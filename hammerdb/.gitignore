@@ -1,0 +1,16 @@
+# HammerDB installation
+HammerDB-*/
+hammerdb
+
+# Generated Tcl scripts
+tcl/*_generated.tcl
+
+# Results (optional - uncomment to track results)
+# results/
+
+# Configuration with secrets
+config/pg_config.env
+
+# Temp files
+*.tmp
+*.log

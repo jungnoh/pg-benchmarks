@@ -1,0 +1,50 @@
+BEGIN {
+    @refaults = 0;
+}
+
+END {
+    for ($kv : @writes) {
+        delete(@writes[$kv.0]);
+    }
+    for ($kv : @ino_writes) {
+        if ($kv.1 <= 2) {
+            delete(@ino_writes[$kv.0]);
+        }
+    }
+}
+
+kprobe:workingset_refault /comm == "postgres" && curtask->mm/ {
+    @refaults += 1;
+    @refaults_ts = tseries(@refaults, 100ms, 99999, "max");
+}
+
+tracepoint:syscalls:sys_enter_pwrite64, tracepoint:syscalls:sys_enter_fsync /comm == "postgres" && curtask->mm/ {
+    if (strcontains(str(uptr(curtask->mm->arg_start), 32), "wal")) {
+        @writes[str((char*)(str(uptr(curtask->mm->arg_start), 48)) + 10)] += 1;
+    }
+    if (strcontains(str(uptr(curtask->mm->arg_start), 32), "checkpointer")) {
+        @writes[str((char*)(str(uptr(curtask->mm->arg_start), 48)) + 10)] += 1;
+    }
+    if (strcontains(str(uptr(curtask->mm->arg_start), 32), "vaccum")) {
+        @writes[str((char*)(str(uptr(curtask->mm->arg_start), 48)) + 10)] += 1;
+    }
+}
+
+kfunc:vfs_write /comm == "postgres" && curtask->mm/ {
+    $inode = args.file->f_inode->i_ino;
+    if (@ino_writes[$inode]) {
+        @ino_writes[$inode] += 1;
+    } else {
+        // printf("New inode access: %d - from %d, %s\n", $inode, pid, str(uptr(curtask->mm->arg_start), 32));
+        @ino_writes[$inode] = 1;
+    }
+}
+
+interval:ms:100 {
+    for ($kv : @writes) {
+        if ($kv.1 > 0) {
+            @writes_ts[$kv.0] = tseries($kv.1, 1s, 99999);
+            @writes[$kv.0] = 0;
+        }
+    }
+}

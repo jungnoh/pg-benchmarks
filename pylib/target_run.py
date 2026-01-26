@@ -1,4 +1,5 @@
 import subprocess
+from subprocess_tee import run as run_tee
 import sys
 import tempfile
 import time
@@ -26,12 +27,12 @@ def shell_command(command: str, log: Optional[LogConfig] = None) -> subprocess.C
     if log:
         log_file_path = log.log_file_path()
         os.makedirs(os.path.dirname(log_file_path), exist_ok=True)
-        result = subprocess.run(command, shell=True, check=True, text=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+        result = run_tee(command, shell=True, check=True, text=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
         with open(log_file_path, "a") as f:
             f.write(result.stdout)
         return result
     else:
-        return subprocess.run(command, shell=True, check=True, text=True, capture_output=True)
+        return run_tee(command, shell=True, check=True, text=True, capture_output=True)
 
 
 @dataclass

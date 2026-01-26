@@ -1,2 +1,6 @@
 **/.envrc
 **/*.log
+logs/
+venv
+**/*.conf
+!conf-examples/*.conf

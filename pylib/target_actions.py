@@ -1,4 +1,4 @@
-from target_run import SshTarget, PgTarget, ssh_command, pg_file, pg_queries, LogConfig
+from .target_run import SshTarget, PgTarget, ssh_command, pg_file, pg_queries, LogConfig
 from typing import Dict, Optional
 import subprocess
 from pathlib import Path
@@ -17,7 +17,7 @@ def cmd_pg_ctlcuster_restart(version: str, name: str = "main") -> str:
 
 def ssh_get_memory_size(target: SshTarget) -> int:
     """
-    Returns the memory size in GB.
+    Returns the memory size in KB.
     """
     result = ssh_command(target, "cat /proc/meminfo | grep MemTotal | awk '{print $2}'")
     return int(result.stdout.strip())

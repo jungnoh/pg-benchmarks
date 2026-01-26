@@ -8,15 +8,15 @@ from typing import List, Optional
 
 @dataclass
 class LogConfig:
-    log_key: str
+    run_id: str
     action: str
     log_root_dir: str = "logs"
 
     def log_file_path(self) -> str:
-        return f"{self.log_root_dir}/{self.log_key}/{self.action}.log"
-    
-    def log_folder_path(self) -> str:
-        return f"{self.log_root_dir}/{self.log_key}"
+        if "." in self.action:
+            return f"{self.log_root_dir}/{self.run_id}/{self.action}"
+        else:
+            return f"{self.log_root_dir}/{self.run_id}/{self.action}.log"
 
 
 def shell_command(command: str, log: Optional[LogConfig] = None) -> subprocess.CompletedProcess:
@@ -24,9 +24,10 @@ def shell_command(command: str, log: Optional[LogConfig] = None) -> subprocess.C
     Executes a single command.
     """
     if log:
-        os.makedirs(log.log_folder_path(), exist_ok=True)
+        log_file_path = log.log_file_path()
+        os.makedirs(os.path.dirname(log_file_path), exist_ok=True)
         result = subprocess.run(command, shell=True, check=True, text=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
-        with open(log.log_file_path(), "a") as f:
+        with open(log_file_path, "a") as f:
             f.write(result.stdout)
         return result
     else:
@@ -35,7 +36,7 @@ def shell_command(command: str, log: Optional[LogConfig] = None) -> subprocess.C
 
 @dataclass
 class SshTarget:
-    user: str
+    username: str
     password: Optional[str] = None
     hostname: str = "localhost"
     port: int = 22
@@ -54,9 +55,9 @@ def ssh_commands(target: SshTarget, commands: List[str], log: Optional[LogConfig
     Executes a list of commands on a remote server.
     """
     if target.password is None:
-        ssh_cmd = f"ssh {target.user}@{target.hostname} -p {target.port}"
+        ssh_cmd = f"ssh {target.username}@{target.hostname} -p {target.port}"
     else:
-        ssh_cmd = f"sshpass -p {target.password} ssh {target.user}@{target.hostname} -p {target.port}"
+        ssh_cmd = f"sshpass -p {target.password} ssh {target.username}@{target.hostname} -p {target.port}"
 
     file = tempfile.NamedTemporaryFile(delete=False)
     file.write("\n".join(commands).encode("utf-8"))

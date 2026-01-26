@@ -7,6 +7,7 @@ from .target_run import SshTarget, PgTarget, LogConfig
 from .util import read_config_file
 from . import target_actions as actions
 from . import target_run as run
+from . import vmstat
 
 class Suite(ABC):
     start_time: float = time.time()
@@ -65,12 +66,12 @@ class SuiteRunner(ABC):
     
     def _run_before(self) -> None:
         mem_size_gb = self._detect_memory_size()
-        print(f"Run: Applying PostgreSQL configurations for {mem_size_gb}GB")
+        print(f"Before: Applying PostgreSQL configurations for {mem_size_gb}GB")
         pg_configs = actions.pg_build_configs(mem_size_gb)
         self._write_pg_configs(mem_size_gb, pg_configs)
         actions.pg_apply_configs(self.suite.pg_admin_target, pg_configs, log=self.suite.log_config("before/log-01-configs"))
 
-        print("Run: Prepare commands")
+        print("Before: Prepare commands")
         run.ssh_commands(
             self.suite.ssh_target,
             [
@@ -84,21 +85,28 @@ class SuiteRunner(ABC):
             self.suite.log_config("before/log-02-script"),
         )
 
-        print("Run: Reset psql stats")
+        print("Before: Reset psql stats")
         actions.pg_clear_stats(self.suite.pg_admin_target, log=self.suite.log_config("before/log-03-stats"))
 
-        print("Run: Log /proc/vmstat")
+        print("Before: Log /proc/vmstat")
         run.ssh_command(self.suite.ssh_target, "sudo cat /proc/vmstat", log=self.suite.log_config("before/vmstat"))
     
     def _run_after(self) -> None:
-        print("Run: Log /proc/vmstat")
+        print("After: Log /proc/vmstat")
         run.ssh_command(self.suite.ssh_target, "sudo cat /proc/vmstat", log=self.suite.log_config("after/vmstat"))
 
-        print("Run: Log psql stats")
+        print("After: Log psql stats")
         actions.pg_print_stats(self.suite.pg_admin_target, log=self.suite.log_config("after/stats"))
 
-        print("Run: Analyze waits")
+        print("After: Analyze waits")
         actions.pg_analyze_waits(self.suite.pg_admin_target, log=self.suite.log_config("after/waits"))
+
+        print("After: Diff vmstat")
+        vmstat.diff(
+            self.suite.log_config("before/vmstat").log_file_path(),
+            self.suite.log_config("after/vmstat").log_file_path(),
+            log=self.suite.log_config("stats/vmstat")
+        )
     
     def _detect_memory_size(self) -> int:
         mem_size = actions.ssh_get_memory_size(self.suite.ssh_target)

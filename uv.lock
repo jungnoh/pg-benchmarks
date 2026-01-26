@@ -1,0 +1,23 @@
+version = 1
+revision = 3
+requires-python = ">=3.12"
+
+[[package]]
+name = "pg-benchmarks"
+version = "0.1.0"
+source = { virtual = "." }
+dependencies = [
+    { name = "subprocess-tee" },
+]
+
+[package.metadata]
+requires-dist = [{ name = "subprocess-tee", specifier = ">=0.4.2" }]
+
+[[package]]
+name = "subprocess-tee"
+version = "0.4.2"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/d7/22/991efbf35bc811dfe7edcd749253f0931d2d4838cf55176132633e1c82a7/subprocess_tee-0.4.2.tar.gz", hash = "sha256:91b2b4da3aae9a7088d84acaf2ea0abee3f4fd9c0d2eae69a9b9122a71476590", size = 14951, upload-time = "2024-06-17T19:51:51.249Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/4d/ab/e3a3be062cd544b2803760ff707dee38f0b1cb5685b2446de0ec19be28d9/subprocess_tee-0.4.2-py3-none-any.whl", hash = "sha256:21942e976715af4a19a526918adb03a8a27a8edab959f2d075b777e3d78f532d", size = 5249, upload-time = "2024-06-17T19:51:15.949Z" },
+]

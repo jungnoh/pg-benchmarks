@@ -29,23 +29,28 @@ class HammerDBConfig(object):
 
 
 class ScriptBuilder(object):
-    def __init__(self, pg_admin_target: PgTarget, pg_runner_target: PgTarget, config: HammerDBConfig):
+    def __init__(
+        self,
+        pg_admin_target: PgTarget,
+        pg_runner_target: PgTarget,
+        config: HammerDBConfig,
+    ):
         self.pg_admin_target = pg_admin_target
         self.pg_runner_target = pg_runner_target
         self.config = config
-    
+
     def write_schema_script(self, dest_file: str):
         with open(dest_file, "w") as f:
             f.write("\n".join(self.build_schema_script()))
-    
+
     def write_run_script(self, dest_file: str):
         with open(dest_file, "w") as f:
             f.write("\n".join(self.build_run_script()))
-    
+
     def write_cleanup_script(self, dest_file: str):
         with open(dest_file, "w") as f:
             f.write("\n".join(self.build_cleanup_script()))
-    
+
     def build_schema_script(self):
         return [
             *self.build_common_script(),
@@ -53,7 +58,7 @@ class ScriptBuilder(object):
             'puts "This may take several minutes depending on warehouse count."',
             "buildschema",
         ]
-    
+
     def build_run_script(self):
         return [
             *self.build_common_script(),
@@ -75,7 +80,7 @@ class ScriptBuilder(object):
             "vudestroy",
             "after 5000",
         ]
-    
+
     def build_cleanup_script(self):
         return [
             *self.build_common_script(),
@@ -83,7 +88,7 @@ class ScriptBuilder(object):
             "deleteschema",
             'puts "Schema dropped."',
         ]
-    
+
     def build_common_script(self):
         return [
             "dbset db pg",
@@ -105,6 +110,10 @@ class ScriptBuilder(object):
         ]
 
 
-def run_script(config: HammerDBConfig, script_path: str, log: Optional[LogConfig] = None) -> subprocess.CompletedProcess:
-    result = shell_command(f"./hammerdbcli auto {script_path}", log=log, cwd=config.hammerdb_path)
+def run_script(
+    config: HammerDBConfig, script_path: str, log: Optional[LogConfig] = None
+) -> subprocess.CompletedProcess:
+    result = shell_command(
+        f"./hammerdbcli auto {script_path}", log=log, cwd=config.hammerdb_path
+    )
     return result

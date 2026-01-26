@@ -7,6 +7,7 @@ import os
 from dataclasses import dataclass
 from typing import List, Optional
 
+
 @dataclass
 class LogConfig:
     run_id: str
@@ -23,19 +24,31 @@ class LogConfig:
         os.makedirs(os.path.dirname(self.log_file_path()), exist_ok=True)
 
 
-def shell_command(command: str, log: Optional[LogConfig] = None, **kwargs) -> subprocess.CompletedProcess:
+def shell_command(
+    command: str, log: Optional[LogConfig] = None, **kwargs
+) -> subprocess.CompletedProcess:
     """
     Executes a single command.
     """
     if log:
         log_file_path = log.log_file_path()
         log.ensure_log_folder()
-        result = run_tee(command, shell=True, check=True, text=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, **kwargs)
+        result = run_tee(
+            command,
+            shell=True,
+            check=True,
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            **kwargs,
+        )
         with open(log_file_path, "a") as f:
             f.write(result.stdout)
         return result
     else:
-        return run_tee(command, shell=True, check=True, text=True, capture_output=True, **kwargs)
+        return run_tee(
+            command, shell=True, check=True, text=True, capture_output=True, **kwargs
+        )
 
 
 @dataclass
@@ -47,14 +60,18 @@ class SshTarget:
     shell: str = "bash"
 
 
-def ssh_command(target: SshTarget, command: str, log: Optional[LogConfig] = None) -> subprocess.CompletedProcess:
+def ssh_command(
+    target: SshTarget, command: str, log: Optional[LogConfig] = None
+) -> subprocess.CompletedProcess:
     """
     Executes a single command on a remote server.
     """
     return ssh_commands(target, [command], log)
 
 
-def ssh_commands(target: SshTarget, commands: List[str], log: Optional[LogConfig] = None) -> subprocess.CompletedProcess:
+def ssh_commands(
+    target: SshTarget, commands: List[str], log: Optional[LogConfig] = None
+) -> subprocess.CompletedProcess:
     """
     Executes a list of commands on a remote server.
     """
@@ -67,7 +84,7 @@ def ssh_commands(target: SshTarget, commands: List[str], log: Optional[LogConfig
     file.write("\n".join(commands).encode("utf-8"))
     file.flush()
     file.close()
-    
+
     result = shell_command(f"cat {file.name} | {ssh_cmd} '{target.shell} -s'", log)
     os.unlink(file.name)
     return result
@@ -82,14 +99,18 @@ class PgTarget:
     database: str = "postgres"
 
 
-def pg_query(target: PgTarget, query: str, log: Optional[LogConfig] = None) -> subprocess.CompletedProcess:
+def pg_query(
+    target: PgTarget, query: str, log: Optional[LogConfig] = None
+) -> subprocess.CompletedProcess:
     """
     Executes a single query in a single psql session.
     """
     pg_queries(target, [query], log)
 
 
-def pg_queries(target: PgTarget, queries: List[str], log: Optional[LogConfig] = None) -> subprocess.CompletedProcess:
+def pg_queries(
+    target: PgTarget, queries: List[str], log: Optional[LogConfig] = None
+) -> subprocess.CompletedProcess:
     """
     Executes a list of queries in a single psql session.
     """
@@ -103,7 +124,9 @@ def pg_queries(target: PgTarget, queries: List[str], log: Optional[LogConfig] = 
     return result
 
 
-def pg_file(target: PgTarget, filename: str, log: Optional[LogConfig] = None) -> subprocess.CompletedProcess:
+def pg_file(
+    target: PgTarget, filename: str, log: Optional[LogConfig] = None
+) -> subprocess.CompletedProcess:
     """
     Executes a file in a single psql session.
     """
@@ -120,11 +143,14 @@ def pg_file(target: PgTarget, filename: str, log: Optional[LogConfig] = None) ->
     return result
 
 
-def pg_query_by_ssh(ssh_target: SshTarget, db_name: str, query: str, log: Optional[LogConfig] = None) -> subprocess.CompletedProcess:
+def pg_query_by_ssh(
+    ssh_target: SshTarget, db_name: str, query: str, log: Optional[LogConfig] = None
+) -> subprocess.CompletedProcess:
     """
     Executes a single query in a single psql session on a remote server.
 
     Assumes that the pg user is 'postgres' and the SshTarget user can sudo into postgres user without a password.
     """
-    return ssh_command(ssh_target, f"sudo -u postgres psql -d {db_name} -c '{query}'", log)
-
+    return ssh_command(
+        ssh_target, f"sudo -u postgres psql -d {db_name} -c '{query}'", log
+    )

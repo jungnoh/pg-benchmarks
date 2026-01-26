@@ -23,27 +23,39 @@ def ssh_get_memory_size(target: SshTarget) -> int:
     return int(result.stdout.strip())
 
 
-def pg_clear_stats(target: PgTarget, log: Optional[LogConfig] = None) -> subprocess.CompletedProcess:
+def pg_clear_stats(
+    target: PgTarget, log: Optional[LogConfig] = None
+) -> subprocess.CompletedProcess:
     """
     Clears the statistics for the PostgreSQL database.
     """
-    return pg_queries(target, [
-        "SELECT pg_stat_statements_reset();",
-        "SELECT pg_stat_kcache_reset();",
-        "SELECT pg_wait_sampling_reset_profile();",
-        "SELECT pg_stat_reset();",
-    ], log)
+    return pg_queries(
+        target,
+        [
+            "SELECT pg_stat_statements_reset();",
+            "SELECT pg_stat_kcache_reset();",
+            "SELECT pg_wait_sampling_reset_profile();",
+            "SELECT pg_stat_reset();",
+        ],
+        log,
+    )
 
 
-def pg_print_stats(target: PgTarget, log: Optional[LogConfig] = None) -> subprocess.CompletedProcess:
+def pg_print_stats(
+    target: PgTarget, log: Optional[LogConfig] = None
+) -> subprocess.CompletedProcess:
     """
     Prints the statistics for the PostgreSQL database.
     """
-    return pg_queries(target, [
-        "SELECT * FROM pg_stat_bgwriter;",
-        "SELECT * FROM pg_stat_io;",
-        "SELECT * FROM pg_stat_wal;",
-    ], log)
+    return pg_queries(
+        target,
+        [
+            "SELECT * FROM pg_stat_bgwriter;",
+            "SELECT * FROM pg_stat_io;",
+            "SELECT * FROM pg_stat_wal;",
+        ],
+        log,
+    )
 
 
 def pg_build_configs(system_mem_size_gb: int) -> Dict[str, str]:
@@ -65,16 +77,20 @@ def pg_build_configs(system_mem_size_gb: int) -> Dict[str, str]:
     }
 
 
-def pg_apply_configs(target: PgTarget, configs: Dict[str, str], log: Optional[LogConfig] = None) -> subprocess.CompletedProcess:
+def pg_apply_configs(
+    target: PgTarget, configs: Dict[str, str], log: Optional[LogConfig] = None
+) -> subprocess.CompletedProcess:
     """
     Applies the configurations to the PostgreSQL database.
     """
-    return pg_queries(target, [
-        f"ALTER SYSTEM SET {k} = '{v}';" for k, v in configs.items()
-    ], log)
+    return pg_queries(
+        target, [f"ALTER SYSTEM SET {k} = '{v}';" for k, v in configs.items()], log
+    )
 
 
-def pg_analyze_waits(target: PgTarget, log: Optional[LogConfig] = None) -> subprocess.CompletedProcess:
+def pg_analyze_waits(
+    target: PgTarget, log: Optional[LogConfig] = None
+) -> subprocess.CompletedProcess:
     """
     Analyzes the waits for the PostgreSQL database.
     """

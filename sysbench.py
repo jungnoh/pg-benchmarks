@@ -10,21 +10,23 @@ class SysbenchSuite(suite.Suite):
         super().__init__()
         self.test_name = test_name
         self.test_conf_args = _build_args_from_test_conf(test_conf_file)
-    
+
     def log_config(self, action: str) -> LogConfig:
-        return LogConfig(run_id=f"sysbench-{self.test_name}/{self.start_time:.0f}", action=action)
-    
+        return LogConfig(
+            run_id=f"sysbench-{self.test_name}/{self.start_time:.0f}", action=action
+        )
+
     def prepare(self):
         shell_command(self._build_command("prepare"))
-    
+
     def run(self):
         cmd = self._build_command("run")
         self._write_cmd_to_log(cmd)
         shell_command(cmd, log=self.log_config("run"))
-    
+
     def cleanup(self):
         shell_command(self._build_command("cleanup"))
-    
+
     def _build_command(self, command: str):
         return [
             "sysbench",
@@ -33,7 +35,7 @@ class SysbenchSuite(suite.Suite):
             *self.test_conf_args,
             command,
         ]
-    
+
     def _write_cmd_to_log(self, cmd: List[str]):
         self.log_config("command").ensure_log_folder()
         with open(self.log_config("command").log_file_path(), "w") as f:
@@ -80,4 +82,3 @@ if __name__ == "__main__":
         s.cleanup()
     else:
         sys.exit(f"Usage: {sys.argv[0]} <prepare|run|cleanup>")
-    

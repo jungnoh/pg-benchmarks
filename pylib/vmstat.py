@@ -1,9 +1,11 @@
 """Compare two /proc/vmstat snapshots and show differences."""
+
 import re
 from typing import Optional
 from pylib.target_run import LogConfig
 
-VMSTAT_PATTERN = re.compile(r'^([a-z_\d]+) (\d+)$')
+VMSTAT_PATTERN = re.compile(r"^([a-z_\d]+) (\d+)$")
+
 
 def parse_file(filename):
     """Parse vmstat file into dict of {metric: value}."""
@@ -14,6 +16,7 @@ def parse_file(filename):
             if match:
                 stats[match.group(1)] = int(match.group(2))
     return stats
+
 
 def diff(before_path: str, after_path: str, log: Optional[LogConfig] = None):
     before = parse_file(before_path)
@@ -28,7 +31,9 @@ def diff(before_path: str, after_path: str, log: Optional[LogConfig] = None):
         if key in before:
             delta = after[key] - before[key]
             if delta != 0:  # only show changed values
-                result.append(f"{key:<32} {before[key]:>14} {after[key]:>14} {delta:>+14}")
+                result.append(
+                    f"{key:<32} {before[key]:>14} {after[key]:>14} {delta:>+14}"
+                )
 
     if log:
         log.ensure_log_folder()

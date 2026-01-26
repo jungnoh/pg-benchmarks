@@ -1,5 +1,6 @@
 from typing import Dict, Optional
 
+
 def read_config_file(path: str, key_to_uppercase=False) -> Dict[str, Optional[str]]:
     """
     Reads a config file and returns a dictionary of key-value pairs.

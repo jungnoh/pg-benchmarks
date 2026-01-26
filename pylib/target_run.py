@@ -23,19 +23,19 @@ class LogConfig:
         os.makedirs(os.path.dirname(self.log_file_path()), exist_ok=True)
 
 
-def shell_command(command: str, log: Optional[LogConfig] = None) -> subprocess.CompletedProcess:
+def shell_command(command: str, log: Optional[LogConfig] = None, **kwargs) -> subprocess.CompletedProcess:
     """
     Executes a single command.
     """
     if log:
         log_file_path = log.log_file_path()
         log.ensure_log_folder()
-        result = run_tee(command, shell=True, check=True, text=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+        result = run_tee(command, shell=True, check=True, text=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, **kwargs)
         with open(log_file_path, "a") as f:
             f.write(result.stdout)
         return result
     else:
-        return run_tee(command, shell=True, check=True, text=True, capture_output=True)
+        return run_tee(command, shell=True, check=True, text=True, capture_output=True, **kwargs)
 
 
 @dataclass

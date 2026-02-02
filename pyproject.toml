@@ -4,5 +4,6 @@ version = "0.1.0"
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
+    "paramiko>=4.0.0",
     "subprocess-tee>=0.4.2",
 ]

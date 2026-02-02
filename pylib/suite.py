@@ -8,6 +8,8 @@ from .util import read_config_file
 from . import target_actions as actions
 from . import target_run as run
 from . import vmstat
+from .bpftrace import BpftraceClient, BpftraceConfig
+from typing import Optional
 
 
 def config_to_bool(config: Dict[str, str], key: str, default: bool = False) -> bool:
@@ -44,6 +46,8 @@ class Suite(ABC):
 
 
 class SuiteRunner(ABC):
+    bpftrace_client: Optional[BpftraceClient] = None
+
     def __init__(self, config_file: str, suite: Suite):
         self.config = read_config_file(config_file)
         self.suite = suite
@@ -69,7 +73,24 @@ class SuiteRunner(ABC):
             hostname=self.config["SSH_HOST"],
             port=self.config["SSH_PORT"],
         )
-        self.pg_optimize_configs = config_to_bool(self.config, "PG_OPTIMIZE_CONFIGS", False)
+        self.pg_optimize_configs = config_to_bool(
+            self.config, "PG_OPTIMIZE_CONFIGS", False
+        )
+        if "BPFTRACE_SCRIPT" in self.config:
+            bpftrace_script = self.config["BPFTRACE_SCRIPT"]
+            # Check if file exists
+            if not Path(bpftrace_script).exists():
+                raise FileNotFoundError(
+                    f"BPFTRACE_SCRIPT file not found: {bpftrace_script}"
+                )
+            bpftrace_config = BpftraceConfig(script_path=bpftrace_script)
+            if "BPFTRACE_PATH" in self.config:
+                bpftrace_config.bpftrace_path = self.config["BPFTRACE_PATH"]
+            self.bpftrace_client = BpftraceClient(
+                self.suite.ssh_target, bpftrace_config
+            )
+        else:
+            self.bpftrace_client = None
 
     def run(self) -> None:
         self._run_before()
@@ -117,6 +138,12 @@ class SuiteRunner(ABC):
             log=self.suite.log_config("before/vmstat"),
         )
 
+        if self.bpftrace_script is not None:
+            print(f"Before: Preparing bpftrace client")
+            self.bpftrace_client.prepare(log=self.suite.log_config("before/bpftrace"))
+            print(f"Before: Running bpftrace script: {self.bpftrace_script}")
+            self.bpftrace_client.start()
+
     def _run_after(self) -> None:
         print("After: Log /proc/vmstat")
         run.ssh_command(
@@ -134,6 +161,17 @@ class SuiteRunner(ABC):
         actions.pg_analyze_waits(
             self.suite.pg_admin_target, log=self.suite.log_config("after/waits")
         )
+
+        if self.bpftrace_client is not None:
+            print(f"After: Stopping bpftrace script")
+            raw = self.bpftrace_client.stop()
+            print(f"After: Writing bpftrace output to file")
+            with open(
+                self.suite.log_config("after/bpftrace").log_file_path(), "w"
+            ) as f:
+                f.write(raw)
+            print(f"After: Cleaning up bpftrace client")
+            self.bpftrace_client.cleanup()
 
         print("After: Diff vmstat")
         vmstat.diff(

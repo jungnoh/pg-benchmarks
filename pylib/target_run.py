@@ -90,6 +90,19 @@ def ssh_commands(
     return result
 
 
+def ssh_copy_file(
+    target: SshTarget, source: str, destination: str, log: Optional[LogConfig] = None
+) -> subprocess.CompletedProcess:
+    """
+    Copies a file to a remote server.
+    """
+    if target.password is None:
+        scp_cmd = f"scp {source} {target.username}@{target.hostname}:{destination}"
+    else:
+        scp_cmd = f"sshpass -p {target.password} scp {source} {target.username}@{target.hostname}:{destination}"
+    return shell_command(scp_cmd, log)
+
+
 @dataclass
 class PgTarget:
     username: str

@@ -43,7 +43,8 @@ def shell_command(
             **kwargs,
         )
         with open(log_file_path, "a") as f:
-            f.write(result.stdout)
+            if result.stdout is not None:
+                f.write(result.stdout)
         return result
     else:
         return run_tee(
@@ -97,9 +98,9 @@ def ssh_copy_file(
     Copies a file to a remote server.
     """
     if target.password is None:
-        scp_cmd = f"scp {source} {target.username}@{target.hostname}:{destination}"
+        scp_cmd = f"scp -P {target.port} {source} {target.username}@{target.hostname}:{destination}"
     else:
-        scp_cmd = f"sshpass -p {target.password} scp {source} {target.username}@{target.hostname}:{destination}"
+        scp_cmd = f"sshpass -p {target.password} scp -P {target.port} {source} {target.username}@{target.hostname}:{destination}"
     return shell_command(scp_cmd, log)
 
 

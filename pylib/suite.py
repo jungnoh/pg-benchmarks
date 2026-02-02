@@ -109,7 +109,7 @@ class SuiteRunner(ABC):
         else:
             print("Before: Using default PostgreSQL configurations")
             pg_configs = actions.pg_default_configs()
-        self._write_pg_configs(mem_size_gb, pg_configs)
+        self._write_pg_configs(mem_size_gb if self.pg_optimize_configs else None, pg_configs)
         actions.pg_apply_configs(
             self.suite.pg_admin_target,
             pg_configs,
@@ -142,10 +142,10 @@ class SuiteRunner(ABC):
             log=self.suite.log_config("before/vmstat"),
         )
 
-        if self.bpftrace_script is not None:
+        if self.bpftrace_client is not None:
             print(f"Before: Preparing bpftrace client")
             self.bpftrace_client.prepare(log=self.suite.log_config("before/bpftrace"))
-            print(f"Before: Running bpftrace script: {self.bpftrace_script}")
+            print(f"Before: Running bpftrace script")
             self.bpftrace_client.start()
 
     def _run_after(self) -> None:
@@ -192,10 +192,11 @@ class SuiteRunner(ABC):
         )
         return rounded_mem_size_gb
 
-    def _write_pg_configs(self, mem_size_gb: int, pg_configs: Dict[str, str]) -> None:
+    def _write_pg_configs(self, mem_size_gb: Optional[int], pg_configs: Dict[str, str]) -> None:
         file_path = self.suite.log_config("before/conf.sql").log_file_path()
         Path(file_path).parent.mkdir(parents=True, exist_ok=True)
         with open(file_path, "w") as f:
-            f.write(f"-- Mem size: {mem_size_gb}GB\n")
+            if mem_size_gb is not None:
+                f.write(f"-- Mem size: {mem_size_gb}GB\n")
             for k, v in pg_configs.items():
                 f.write(f"ALTER SYSTEM SET {k} = '{v}';\n")

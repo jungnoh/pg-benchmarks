@@ -37,10 +37,10 @@ class BpftraceClient:
         print("Connected to the target")
 
     def start(self) -> int:
-        _, stdout, _ = self.ssh.exec_command(
-            f"sudo bash -c 'BPFTRACE_MAX_MAP_KEYS=131072 nohup sudo {self.config.bpftrace_path} {self._REMOTE_SCRIPT_PATH} {self.config.bpftrace_additional_args} "
+        bpftrace_cmd = f"sudo bash -c 'BPFTRACE_MAX_MAP_KEYS=131072 nohup sudo {self.config.bpftrace_path} {self._REMOTE_SCRIPT_PATH} {self.config.bpftrace_additional_args} " + \
             "> /tmp/probe.out 2>&1 & echo $!'"
-        )
+        print(f"Running bpftrace command: {bpftrace_cmd}")
+        _, stdout, _ = self.ssh.exec_command(bpftrace_cmd)
         pid = int(stdout.read().decode().strip())
         print(f"Bpftrace script started with PID: {pid}")
         self.remote_trace_pid = pid

@@ -86,6 +86,10 @@ class SuiteRunner(ABC):
             bpftrace_config = BpftraceConfig(script_path=bpftrace_script)
             if "BPFTRACE_PATH" in self.config:
                 bpftrace_config.bpftrace_path = self.config["BPFTRACE_PATH"]
+            if "BPFTRACE_ADDITIONAL_ARGS" in self.config:
+                bpftrace_config.bpftrace_additional_args = self.config[
+                    "BPFTRACE_ADDITIONAL_ARGS"
+                ]
             self.bpftrace_client = BpftraceClient(
                 self.suite.ssh_target, bpftrace_config
             )

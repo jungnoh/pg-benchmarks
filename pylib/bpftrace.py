@@ -8,6 +8,7 @@ import time
 @dataclass
 class BpftraceConfig:
     bpftrace_path: str = "/home/jungnoh/bpftrace"
+    bpftrace_additional_args: str = ""
     script_path: str = "pg_bpftrace.bt"
 
 
@@ -37,7 +38,7 @@ class BpftraceClient:
 
     def start(self) -> int:
         _, stdout, _ = self.ssh.exec_command(
-            f"sudo bash -c 'nohup {self.config.bpftrace_path} -M 131072 {self._REMOTE_SCRIPT_PATH} 26 "
+            f"sudo bash -c 'BPFTRACE_MAX_MAP_KEYS=131072 nohup sudo {self.config.bpftrace_path} {self._REMOTE_SCRIPT_PATH} {self.config.bpftrace_additional_args} "
             "> /tmp/probe.out 2>&1 & echo $!'"
         )
         pid = int(stdout.read().decode().strip())

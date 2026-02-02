@@ -77,6 +77,23 @@ def pg_build_configs(system_mem_size_gb: int) -> Dict[str, str]:
     }
 
 
+def pg_default_configs() -> Dict[str, str]:
+    """
+    Returns the default configurations for the PostgreSQL database.
+    Default values reference: https://postgresqlco.nf/doc/en/param/
+    """
+    return {
+        "shared_buffers": "128MB",
+        "effective_cache_size": "4GB",
+        "maintenance_work_mem": "64MB",
+        "random_page_cost": "4",
+        "checkpoint_completion_target": "0.9",
+        "effective_io_concurrency": "1",
+        "min_wal_size": "80MB",
+        "max_wal_size": "1GB",
+    }
+
+
 def pg_apply_configs(
     target: PgTarget, configs: Dict[str, str], log: Optional[LogConfig] = None
 ) -> subprocess.CompletedProcess:

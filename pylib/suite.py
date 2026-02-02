@@ -10,6 +10,16 @@ from . import target_run as run
 from . import vmstat
 
 
+def config_to_bool(config: Dict[str, str], key: str, default: bool = False) -> bool:
+    value = config.get(key, default)
+    if value.lower() in ["true", "yes", "1"]:
+        return True
+    elif value.lower() in ["false", "no", "0"]:
+        return False
+    else:
+        raise ValueError(f"Invalid boolean value: {value}")
+
+
 class Suite(ABC):
     start_time: float = time.time()
 
@@ -59,6 +69,7 @@ class SuiteRunner(ABC):
             hostname=self.config["SSH_HOST"],
             port=self.config["SSH_PORT"],
         )
+        self.pg_optimize_configs = config_to_bool(self.config, "PG_OPTIMIZE_CONFIGS", False)
 
     def run(self) -> None:
         self._run_before()
@@ -66,9 +77,13 @@ class SuiteRunner(ABC):
         self._run_after()
 
     def _run_before(self) -> None:
-        mem_size_gb = self._detect_memory_size()
-        print(f"Before: Applying PostgreSQL configurations for {mem_size_gb}GB")
-        pg_configs = actions.pg_build_configs(mem_size_gb)
+        if self.pg_optimize_configs:
+            mem_size_gb = self._detect_memory_size()
+            print(f"Before: Applying PostgreSQL configurations for {mem_size_gb}GB")
+            pg_configs = actions.pg_build_configs(mem_size_gb)
+        else:
+            print("Before: Using default PostgreSQL configurations")
+            pg_configs = actions.pg_default_configs()
         self._write_pg_configs(mem_size_gb, pg_configs)
         actions.pg_apply_configs(
             self.suite.pg_admin_target,

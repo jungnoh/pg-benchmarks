@@ -76,20 +76,9 @@ class SuiteRunner(ABC):
         self.pg_optimize_configs = config_to_bool(
             self.config, "PG_OPTIMIZE_CONFIGS", False
         )
-        if "BPFTRACE_SCRIPT" in self.config:
-            bpftrace_script = self.config["BPFTRACE_SCRIPT"]
-            # Check if file exists
-            if not Path(bpftrace_script).exists():
-                raise FileNotFoundError(
-                    f"BPFTRACE_SCRIPT file not found: {bpftrace_script}"
-                )
-            bpftrace_config = BpftraceConfig(script_path=bpftrace_script)
-            if "BPFTRACE_PATH" in self.config:
-                bpftrace_config.bpftrace_path = self.config["BPFTRACE_PATH"]
-            if "BPFTRACE_ADDITIONAL_ARGS" in self.config:
-                bpftrace_config.bpftrace_additional_args = self.config[
-                    "BPFTRACE_ADDITIONAL_ARGS"
-                ]
+
+        if config_to_bool(self.config, "BPFTRACE_PG_PAGE_INTERVALS", False):
+            bpftrace_config = _build_bpftrace_config(self.config)
             self.bpftrace_client = BpftraceClient(
                 self.suite.ssh_target, bpftrace_config
             )
@@ -109,7 +98,9 @@ class SuiteRunner(ABC):
         else:
             print("Before: Using default PostgreSQL configurations")
             pg_configs = actions.pg_default_configs()
-        self._write_pg_configs(mem_size_gb if self.pg_optimize_configs else None, pg_configs)
+        self._write_pg_configs(
+            mem_size_gb if self.pg_optimize_configs else None, pg_configs
+        )
         actions.pg_apply_configs(
             self.suite.pg_admin_target,
             pg_configs,
@@ -192,7 +183,9 @@ class SuiteRunner(ABC):
         )
         return rounded_mem_size_gb
 
-    def _write_pg_configs(self, mem_size_gb: Optional[int], pg_configs: Dict[str, str]) -> None:
+    def _write_pg_configs(
+        self, mem_size_gb: Optional[int], pg_configs: Dict[str, str]
+    ) -> None:
         file_path = self.suite.log_config("before/conf.sql").log_file_path()
         Path(file_path).parent.mkdir(parents=True, exist_ok=True)
         with open(file_path, "w") as f:
@@ -200,3 +193,16 @@ class SuiteRunner(ABC):
                 f.write(f"-- Mem size: {mem_size_gb}GB\n")
             for k, v in pg_configs.items():
                 f.write(f"ALTER SYSTEM SET {k} = '{v}';\n")
+
+
+def _build_bpftrace_config(config: Dict[str, str]) -> BpftraceConfig:
+    script_path = Path(__file__).parent / "scripts" / "pg_page_intervals.bt"
+    parse_script_path = Path(__file__).parent / "scripts" / "pg_page_intervals_parse.py"
+    cfg = BpftraceConfig(
+        bpftrace_additional_args="$(id -u postgres)",
+        script_path=script_path,
+        parse_script=parse_script_path,
+    )
+    if "BPFTRACE_PATH" in config:
+        cfg.bpftrace_path = config["BPFTRACE_PATH"]
+    return cfg

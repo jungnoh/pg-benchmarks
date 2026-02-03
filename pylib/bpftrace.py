@@ -10,10 +10,12 @@ class BpftraceConfig:
     bpftrace_path: str = "/home/jungnoh/bpftrace"
     bpftrace_additional_args: str = ""
     script_path: str = "pg_bpftrace.bt"
+    parse_script: Optional[str] = None
 
 
 class BpftraceClient:
     _REMOTE_SCRIPT_PATH: str = "/tmp/pg_trace.bt"
+    _REMOTE_PARSE_SCRIPT_PATH: str = "/tmp/pg_trace_parse"
 
     def __init__(self, target: SshTarget, config: BpftraceConfig):
         self.target = target
@@ -27,6 +29,14 @@ class BpftraceClient:
         ssh_copy_file(
             self.target, self.config.script_path, self._REMOTE_SCRIPT_PATH, log
         )
+        if self.config.parse_script is not None:
+            print("Sending bpftrace parse script to the target")
+            ssh_copy_file(
+                self.target,
+                self.config.parse_script,
+                self._REMOTE_PARSE_SCRIPT_PATH,
+                log,
+            )
         print("Connecting to the target")
         self.ssh.connect(
             self.target.hostname,
@@ -37,8 +47,10 @@ class BpftraceClient:
         print("Connected to the target")
 
     def start(self) -> int:
-        bpftrace_cmd = f"sudo bash -c 'BPFTRACE_MAX_MAP_KEYS=131072 nohup sudo {self.config.bpftrace_path} {self._REMOTE_SCRIPT_PATH} {self.config.bpftrace_additional_args} " + \
-            "> /tmp/probe.out 2>&1 & echo $!'"
+        bpftrace_cmd = (
+            f"sudo bash -c 'BPFTRACE_MAX_MAP_KEYS=131072 nohup sudo {self.config.bpftrace_path} {self._REMOTE_SCRIPT_PATH} {self.config.bpftrace_additional_args} "
+            + "> /tmp/probe.out 2>&1 & echo $!'"
+        )
         print(f"Running bpftrace command: {bpftrace_cmd}")
         _, stdout, _ = self.ssh.exec_command(bpftrace_cmd)
         pid = int(stdout.read().decode().strip())
@@ -55,9 +67,17 @@ class BpftraceClient:
         print(f"Bpftrace script stopped with PID: {self.remote_trace_pid}")
         self.remote_trace_pid = None
 
-        _, stdout, _ = self.ssh.exec_command("cat /tmp/probe.out")
-        raw = stdout.read().decode()
-        return raw
+        if self.config.parse_script is None:
+            _, stdout, _ = self.ssh.exec_command("cat /tmp/probe.out")
+            raw = stdout.read().decode()
+            return raw
+        else:
+            print("Running bpftrace parse script")
+            _, stdout, _ = self.ssh.exec_command(
+                f"{self._REMOTE_PARSE_SCRIPT_PATH} /tmp/probe.out"
+            )
+            raw = stdout.read().decode()
+            return raw
 
     def cleanup(self):
         self.ssh.close()

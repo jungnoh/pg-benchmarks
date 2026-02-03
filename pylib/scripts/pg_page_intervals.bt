@@ -3,26 +3,19 @@
  * pg_page_intervals.bt
  *
  * Measure the re-access intervals of file-backed pages (identified by
- * device + inode + page-aligned file offset) for PostgreSQL processes.
- * Records which processes (comm, pid) touch each page and computes the
- * minimum time between consecutive accesses to the same page.
+ * inode + 8KB-aligned file offset) for PostgreSQL processes.
  *
- * Argument:
- *   $1  UID of the PostgreSQL OS user (e.g. $(id -u postgres))
+ * Map entry counts (for I inodes, B blocks):
+ *   @_ts    [ino, blk]      — I*B entries   (last-access timestamp)
+ *   @_min   [ino, blk]      — I*B entries   (min re-access interval)
+ *   @procs  [ino]           — I entries     (access count per inode, NOT per block)
+ *   @fname  [ino]           — I entries
  *
- * Usage (standalone):
+ * Arguments:
+ *   $1  UID of the PostgreSQL OS user
+ *
+ * Usage:
  *   sudo bpftrace pg_page_intervals.bt $(id -u postgres)
- *
- * Usage (with sorted output via wrapper):
- *   sudo ./pg_page_intervals.sh [duration_secs] [pg_uid]
- *
- * Notes:
- *   - Pages are 4 KB (kernel PAGE_SIZE).  PostgreSQL uses 8 KB blocks,
- *     so each PG block spans 2 consecutive page indices.
- *   - Each vfs_read / vfs_write is decomposed into up to 16 pages
- *     (64 KB).  Larger I/Os are capped (rare for PostgreSQL).
- *   - If the map fills up (default 4096 entries in some bpftrace
- *     versions), pass  -M 131072  to bpftrace.
  */
 
 BEGIN
@@ -32,35 +25,23 @@ BEGIN
     $st = (uint64)66305;
     @_target_dev = ((($st >> 8) & 0xFFF) << 20) | ($st & 0xFF) | (($st >> 12) & 0xFFF00);
     printf("Tracing UID %d, dev %u\n", $1, @_target_dev);
-
-    printf("Tracing file-backed page accesses for UID %d ...\n", $1);
     printf("Press Ctrl-C to stop and display results.\n\n");
 }
 
-/*
- * Probe both reads and writes through the VFS layer.
- * vfs_read  signature: (struct file *file, char __user *buf, size_t count, loff_t *pos)
- * vfs_write signature: (struct file *file, const char __user *buf, size_t count, loff_t *pos)
- */
 kprobe:vfs_read,
 kprobe:vfs_write
 /uid == $1/
 {
     $file  = (struct file *)arg0;
     $inode = $file->f_inode;
-    $dev = (uint64)$inode->i_sb->s_dev;
 
-    /* ---- Only regular files (skip pipes, sockets, devs) ---- */
     if (($inode->i_mode & 0xF000) != 0x8000) {
         return;
     }
-
-    if ($dev != @_target_dev) {
+    if ((uint64)$inode->i_sb->s_dev != @_target_dev) {
         return;
     }
-
-    $count = (uint64)arg2;
-    if ($count == 0) {
+    if ((uint64)arg2 == 0) {
         return;
     }
 
@@ -68,38 +49,26 @@ kprobe:vfs_write
     $pos = *(int64 *)arg3;
     $now = nsecs;
 
-    /* ---- Remember inode → base filename for the report ---- */
+    /* 8 KB block index — matches PostgreSQL BLCKSZ, halves map entries vs 4KB */
+    $blk = (uint64)($pos >> 13);
+
     @fname[$ino] = str($file->f_path.dentry->d_name.name);
 
-    /* ---- Compute the range of 4 KB pages touched ---- */
-    $pg0 = (uint64)($pos >> 12);
-    $pgN = (uint64)(($pos + $count - 1) >> 12);
-    $n   = $pgN - $pg0 + 1;
-    if ($n > 4) { $n = 4; }
-
-    /* ---- Per-page interval tracking (unrolled) ---- */
-    $i = (uint64)0;
-    unroll(4) {
-        if ($i < $n) {
-            $pg   = $pg0 + $i;
-            $prev = @_ts[$ino, $pg];
-
-            if ($prev) {
-                $delta = $now - $prev;
-                $cur   = @_min[$ino, $pg];
-                if (!$cur || $delta < $cur) {
-                    @_min[$ino, $pg] = $delta;
-                }
-            }
-
-            @_ts[$ino, $pg]                = $now;
-            @procs[$ino, $pg, comm, pid]   = count();
+    /* ---- Interval tracking (single block per syscall) ---- */
+    $prev = @_ts[$ino, $blk];
+    if ($prev) {
+        $delta = $now - $prev;
+        $cur   = @_min[$ino, $blk];
+        if (!$cur || $delta < $cur) {
+            @_min[$ino, $blk] = $delta;
         }
-        $i++;
     }
+    @_ts[$ino, $blk] = $now;
+
+    /* ---- Process tracking per inode (not per block) ---- */
+    @procs[$ino] = count();
 }
 
-/* ---- Output everything on Ctrl-C ---- */
 END
 {
     printf("\n===FNAME_START===\n");
@@ -114,6 +83,7 @@ END
     print(@procs);
     printf("===PROCS_END===\n");
 
+    clear(@_target_dev);
     clear(@_ts);
     clear(@fname);
     clear(@_min);

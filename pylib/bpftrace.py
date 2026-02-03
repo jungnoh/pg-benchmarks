@@ -48,7 +48,7 @@ class BpftraceClient:
 
     def start(self) -> int:
         bpftrace_cmd = (
-            f"sudo bash -c 'BPFTRACE_MAX_MAP_KEYS=1048576 nohup sudo {self.config.bpftrace_path} {self._REMOTE_SCRIPT_PATH} {self.config.bpftrace_additional_args} "
+            f"sudo bash -c 'BPFTRACE_MAX_MAP_KEYS=9999999 nohup {self.config.bpftrace_path} {self._REMOTE_SCRIPT_PATH} {self.config.bpftrace_additional_args} "
             + "> /tmp/probe.out 2>&1 & echo $!'"
         )
         print(f"Running bpftrace command: {bpftrace_cmd}")
@@ -63,8 +63,17 @@ class BpftraceClient:
             print("No bpftrace script is running")
             return
         self.ssh.exec_command(f"sudo kill -INT {self.remote_trace_pid}")
-        time.sleep(5)  # wait for the script to finish
-        print(f"Bpftrace script stopped with PID: {self.remote_trace_pid}")
+        # Wait for script to finish
+        for i in range(20):
+            # Check if the script is still running
+            _, stdout, _ = self.ssh.exec_command(f"ps -p {self.remote_trace_pid}")
+            if f"{self.remote_trace_pid}" not in stdout.read().decode():
+                print(f"Bpftrace script stopped with PID: {self.remote_trace_pid}")
+                break
+            if i == 19:
+                print(f"Bpftrace script did not stop with PID: {self.remote_trace_pid}")
+                break
+            time.sleep(0.5)
         self.remote_trace_pid = None
 
         if self.config.parse_script is None:

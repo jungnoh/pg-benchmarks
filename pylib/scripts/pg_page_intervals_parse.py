@@ -6,16 +6,14 @@ import sys
 
 
 def parse_stream(fh):
-    fnames = {}  # (ino) -> filename
-    mins = {}  # (ino, pg) -> min_ns
-    procs = {}  # (ino, pg) -> ["comm(pid)xN", ...]
+    fnames = {}  # ino -> filename
+    mins = {}  # (ino, blk) -> min_ns
+    procs = {}  # ino -> {comm: count}
 
     section = None
     re_fname = re.compile(r"@fname\[(\d+)\]:\s*(.+)")
     re_min = re.compile(r"@_min\[(\d+),\s*(\d+)\]:\s*(\d+)")
-    re_proc = re.compile(
-        r"@procs\[(\d+),\s*(\d+),\s*([^,]+),\s*(\d+)\]:\s*(\d+)"
-    )
+    re_proc = re.compile(r"@procs\[(\d+)\]:\s*(\d+)")
 
     for line in fh:
         if "===FNAME_START===" in line:
@@ -34,18 +32,17 @@ def parse_stream(fh):
         if section == "fname":
             m = re_fname.match(line)
             if m:
-                fnames[(int(m[1]), int(m[2]))] = m[3].strip()
+                fnames[int(m[1])] = m[2].strip()
 
         elif section == "min":
             m = re_min.match(line)
             if m:
-                mins[(int(m[1]), int(m[2]), int(m[3]))] = int(m[4])
+                mins[(int(m[1]), int(m[2]))] = int(m[3])
 
         elif section == "proc":
             m = re_proc.match(line)
             if m:
-                key = (int(m[1]), int(m[2]), int(m[3]))
-                procs.setdefault(key, []).append(f"{m[4].strip()}({m[5]})x{m[6]}")
+                procs[int(m[1])] = int(m[2])
 
     return fnames, mins, procs
 
@@ -64,19 +61,26 @@ def main():
     fh = open(sys.argv[1]) if len(sys.argv) > 1 else sys.stdin
     fnames, mins, procs = parse_stream(fh)
 
-    sorted_pages = sorted(mins.items(), key=lambda kv: kv[1])
+    sorted_blocks = reversed(sorted(mins.items(), key=lambda kv: kv[1]))
 
     print(
-        f"{'MIN INTERVAL':>14}  {'FILENAME':<30}  {'OFFSET':>10}  {'PAGE':>8}  PROCESSES"
+        f"{'MIN INTERVAL':>14} {'NS':>14} {'FILENAME':<30}  {'OFFSET':>10}  {'BLK':>8}  {'INODE':>10}  {'ACCESSES':>10}"
     )
-    print("-" * 110)
-    for (ino, pg), ns in sorted_pages:
+    print("-" * 100)
+    for (ino, blk), ns in sorted_blocks:
+        # Skip intervals less than 1s
+        if ns < 1_000_000_000:
+            continue
+        fname = fnames.get(ino, "?")
+        count = procs.get(ino, 0)
         print(
             f"{human_ns(ns):>14}  "
-            f"{fnames.get((ino), '?'):<30}  "
-            f"{pg * 4096:>10}  "
-            f"{pg:>8}  "
-            f"{', '.join(procs.get((ino, pg), ['?']))}"
+            f"{ns:>14}  "
+            f"{fname:<30}  "
+            f"{blk * 8192:>10}  "
+            f"{blk:>8}  "
+            f"{ino:>10}  "
+            f"{count:>10}"
         )
 
 

@@ -48,7 +48,7 @@ class BpftraceClient:
 
     def start(self) -> int:
         bpftrace_cmd = (
-            f"sudo bash -c 'BPFTRACE_MAX_MAP_KEYS=131072 nohup sudo {self.config.bpftrace_path} {self._REMOTE_SCRIPT_PATH} {self.config.bpftrace_additional_args} "
+            f"sudo bash -c 'BPFTRACE_MAX_MAP_KEYS=1048576 nohup sudo {self.config.bpftrace_path} {self._REMOTE_SCRIPT_PATH} {self.config.bpftrace_additional_args} "
             + "> /tmp/probe.out 2>&1 & echo $!'"
         )
         print(f"Running bpftrace command: {bpftrace_cmd}")

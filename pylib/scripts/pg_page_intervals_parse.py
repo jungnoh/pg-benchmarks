@@ -6,15 +6,15 @@ import sys
 
 
 def parse_stream(fh):
-    fnames = {}  # (dev, ino) -> filename
-    mins = {}  # (dev, ino, pg) -> min_ns
-    procs = {}  # (dev, ino, pg) -> ["comm(pid)xN", ...]
+    fnames = {}  # (ino) -> filename
+    mins = {}  # (ino, pg) -> min_ns
+    procs = {}  # (ino, pg) -> ["comm(pid)xN", ...]
 
     section = None
-    re_fname = re.compile(r"@fname\[(\d+),\s*(\d+)\]:\s*(.+)")
-    re_min = re.compile(r"@_min\[(\d+),\s*(\d+),\s*(\d+)\]:\s*(\d+)")
+    re_fname = re.compile(r"@fname\[(\d+)\]:\s*(.+)")
+    re_min = re.compile(r"@_min\[(\d+),\s*(\d+)\]:\s*(\d+)")
     re_proc = re.compile(
-        r"@procs\[(\d+),\s*(\d+),\s*(\d+),\s*([^,]+),\s*(\d+)\]:\s*(\d+)"
+        r"@procs\[(\d+),\s*(\d+),\s*([^,]+),\s*(\d+)\]:\s*(\d+)"
     )
 
     for line in fh:
@@ -70,13 +70,13 @@ def main():
         f"{'MIN INTERVAL':>14}  {'FILENAME':<30}  {'OFFSET':>10}  {'PAGE':>8}  PROCESSES"
     )
     print("-" * 110)
-    for (dev, ino, pg), ns in sorted_pages:
+    for (ino, pg), ns in sorted_pages:
         print(
             f"{human_ns(ns):>14}  "
-            f"{fnames.get((dev, ino), '?'):<30}  "
+            f"{fnames.get((ino), '?'):<30}  "
             f"{pg * 4096:>10}  "
             f"{pg:>8}  "
-            f"{', '.join(procs.get((dev, ino, pg), ['?']))}"
+            f"{', '.join(procs.get((ino, pg), ['?']))}"
         )
 
 

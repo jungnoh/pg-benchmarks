@@ -27,6 +27,12 @@
 
 BEGIN
 {
+    // $ stat -c '%d' /mnt/psql/18
+    // 66305
+    $st = (uint64)66305;
+    @_target_dev = ((($st >> 8) & 0xFFF) << 20) | ($st & 0xFF) | (($st >> 12) & 0xFFF00);
+    printf("Tracing UID %d, dev %u\n", $1, @_target_dev);
+
     printf("Tracing file-backed page accesses for UID %d ...\n", $1);
     printf("Press Ctrl-C to stop and display results.\n\n");
 }
@@ -42,9 +48,14 @@ kprobe:vfs_write
 {
     $file  = (struct file *)arg0;
     $inode = $file->f_inode;
+    $dev = (uint64)$inode->i_sb->s_dev;
 
     /* ---- Only regular files (skip pipes, sockets, devs) ---- */
     if (($inode->i_mode & 0xF000) != 0x8000) {
+        return;
+    }
+
+    if ($dev != @_target_dev) {
         return;
     }
 
@@ -54,36 +65,35 @@ kprobe:vfs_write
     }
 
     $ino = (uint64)$inode->i_ino;
-    $dev = (uint64)$inode->i_sb->s_dev;
     $pos = *(int64 *)arg3;
     $now = nsecs;
 
     /* ---- Remember inode → base filename for the report ---- */
-    @fname[$dev, $ino] = str($file->f_path.dentry->d_name.name);
+    @fname[$ino] = str($file->f_path.dentry->d_name.name);
 
     /* ---- Compute the range of 4 KB pages touched ---- */
     $pg0 = (uint64)($pos >> 12);
     $pgN = (uint64)(($pos + $count - 1) >> 12);
     $n   = $pgN - $pg0 + 1;
-    if ($n > 16) { $n = 16; }
+    if ($n > 4) { $n = 4; }
 
     /* ---- Per-page interval tracking (unrolled) ---- */
     $i = (uint64)0;
-    unroll(16) {
+    unroll(4) {
         if ($i < $n) {
             $pg   = $pg0 + $i;
-            $prev = @_ts[$dev, $ino, $pg];
+            $prev = @_ts[$ino, $pg];
 
             if ($prev) {
                 $delta = $now - $prev;
-                $cur   = @_min[$dev, $ino, $pg];
+                $cur   = @_min[$ino, $pg];
                 if (!$cur || $delta < $cur) {
-                    @_min[$dev, $ino, $pg] = $delta;
+                    @_min[$ino, $pg] = $delta;
                 }
             }
 
-            @_ts[$dev, $ino, $pg]                = $now;
-            @procs[$dev, $ino, $pg, comm, pid]   = count();
+            @_ts[$ino, $pg]                = $now;
+            @procs[$ino, $pg, comm, pid]   = count();
         }
         $i++;
     }

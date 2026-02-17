@@ -78,7 +78,7 @@ class SuiteRunner(ABC):
         )
 
         if config_to_bool(self.config, "BPFTRACE_PG_PAGE_INTERVALS", False):
-            bpftrace_config = _build_bpftrace_config(self.config)
+            bpftrace_config = BpftraceConfig.pg_page_intervals(self.config)
             self.bpftrace_client = BpftraceClient(
                 self.suite.ssh_target, bpftrace_config
             )
@@ -193,16 +193,3 @@ class SuiteRunner(ABC):
                 f.write(f"-- Mem size: {mem_size_gb}GB\n")
             for k, v in pg_configs.items():
                 f.write(f"ALTER SYSTEM SET {k} = '{v}';\n")
-
-
-def _build_bpftrace_config(config: Dict[str, str]) -> BpftraceConfig:
-    script_path = Path(__file__).parent / "scripts" / "pg_page_intervals.bt"
-    parse_script_path = Path(__file__).parent / "scripts" / "pg_page_intervals_parse.py"
-    cfg = BpftraceConfig(
-        bpftrace_additional_args="$(id -u postgres)",
-        script_path=script_path,
-        parse_script=parse_script_path,
-    )
-    if "BPFTRACE_PATH" in config:
-        cfg.bpftrace_path = config["BPFTRACE_PATH"]
-    return cfg

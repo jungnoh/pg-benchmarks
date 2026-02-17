@@ -11,6 +11,7 @@ class BpftraceConfig:
     bpftrace_additional_args: str = ""
     script_path: str = "pg_bpftrace.bt"
     parse_script: Optional[str] = None
+    cleanup_timeout: int = 300
 
 
 class BpftraceClient:
@@ -64,13 +65,14 @@ class BpftraceClient:
             return
         self.ssh.exec_command(f"sudo kill -INT {self.remote_trace_pid}")
         # Wait for script to finish
-        for i in range(20):
+        WAIT_COUNT = self.config.cleanup_timeout / 0.5    
+        for i in range(WAIT_COUNT):
             # Check if the script is still running
             _, stdout, _ = self.ssh.exec_command(f"ps -p {self.remote_trace_pid}")
             if f"{self.remote_trace_pid}" not in stdout.read().decode():
                 print(f"Bpftrace script stopped with PID: {self.remote_trace_pid}")
                 break
-            if i == 19:
+            if i == WAIT_COUNT - 1:
                 print(f"Bpftrace script did not stop with PID: {self.remote_trace_pid}")
                 break
             time.sleep(0.5)

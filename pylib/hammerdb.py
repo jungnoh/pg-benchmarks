@@ -11,7 +11,6 @@ class HammerDBConfig(object):
     tpcc_vu: int
     tpcc_rampup: int
     tpcc_duration: int
-    tpcc_time_profile: bool
     tpcc_all_warehouses: bool
 
     def read_config_file(config_file: str):
@@ -23,7 +22,6 @@ class HammerDBConfig(object):
         result.tpcc_vu = config.get("TPCC_VU", "4")
         result.tpcc_rampup = config.get("TPCC_RAMPUP", "2")
         result.tpcc_duration = config.get("TPCC_DURATION", "5")
-        result.tpcc_time_profile = config.get("TPCC_TIME_PROFILE", "false")
         result.tpcc_all_warehouses = config.get("TPCC_ALL_WAREHOUSES", "false")
         return result
 
@@ -64,18 +62,33 @@ class ScriptBuilder(object):
             *self.build_common_script(),
             f"diset tpcc pg_rampup {self.config.tpcc_rampup}",
             f"diset tpcc pg_duration {self.config.tpcc_duration}",
-            f"diset tpcc pg_timeprofile {self.config.tpcc_time_profile}",
+            f"diset tpcc pg_timeprofile true",
             f"diset tpcc pg_allwarehouse {self.config.tpcc_all_warehouses}",
             "loadscript",
             f"vuset vu {self.config.tpcc_vu}",
             "vuset logtotemp 1",
             "vuset unique 1",
+            "vuset showoutput 1",
+            "tcset refreshrate 10",
+            "tcset logtotemp 1",
+            "tcset timestamps 1",
             'puts "Creating virtual users..."',
             "vucreate",
+            'puts "Starting transaction counter..."',
+            "tcstart",
             'puts "Starting TPC-C run..."',
-            "vurun",
-            f"set wait_time [expr {{({self.config.tpcc_rampup} + {self.config.tpcc_duration} + 1) * 60000}}]",
-            "runtimer $wait_time",
+            "set jobid [ vurun ]",
+            "set jobid [ split $jobid '=' ]",
+            "set jobid [ lindex $jobid 1 ]",
+            'puts "Job ID: $jobid"',
+            'puts "Stopping transaction counter..."',
+            "tcstop",
+            'puts "=== Latency Percentiles ==="',
+            'jobs $jobid timing',
+            'puts "=== END ==="',
+            'puts "=== Transaction Counter Status ==="',
+            "tcstatus",
+            'puts "=== END ==="',
             'puts "Cleaning up..."',
             "vudestroy",
             "after 5000",

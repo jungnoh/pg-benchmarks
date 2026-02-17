@@ -5,3 +5,4 @@ venv
 **/*.conf
 !conf-examples/*.conf
 hammerdb-scripts/
+*.tar.gz

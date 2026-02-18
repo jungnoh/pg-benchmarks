@@ -84,7 +84,7 @@ class ScriptBuilder(object):
             'puts "Stopping transaction counter..."',
             "tcstop",
             'puts "=== Latency Percentiles ==="',
-            'jobs $jobid timing',
+            "jobs $jobid timing",
             'puts "=== END ==="',
             'puts "=== Transaction Counter Status ==="',
             "tcstatus",

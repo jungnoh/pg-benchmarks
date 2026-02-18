@@ -4,6 +4,7 @@ from .target_run import SshTarget, LogConfig, ssh_copy_file
 from typing import Optional, Dict
 import time
 from pathlib import Path
+import uuid
 
 
 SCRIPT_DIR = Path(__file__).parent / "bpftrace-scripts"
@@ -11,13 +12,23 @@ SCRIPT_DIR = Path(__file__).parent / "bpftrace-scripts"
 
 @dataclass
 class BpftraceConfig:
-    def pg_page_intervals(config: Dict[str, str]) -> 'BpftraceConfig':
+    def pg_page_intervals(config: Dict[str, str]) -> "BpftraceConfig":
         script_path = SCRIPT_DIR / "pg_page_intervals.bt"
         parse_script = SCRIPT_DIR / "pg_page_intervals_parse.py"
         cfg = BpftraceConfig(
             name="pg_page_intervals",
             script_path=script_path,
             parse_script=parse_script,
+            bpftrace_additional_args="$(id -u postgres)",
+        )
+        return cfg._apply_config(config)
+
+    def pg_wal_access(config: Dict[str, str]) -> "BpftraceConfig":
+        script_path = SCRIPT_DIR / "pg_wal_access.bt"
+        cfg = BpftraceConfig(
+            name="pg_wal_access",
+            script_path=script_path,
+            parse_script=None,
             bpftrace_additional_args="$(id -u postgres)",
         )
         return cfg._apply_config(config)
@@ -38,8 +49,8 @@ class BpftraceConfig:
 
 
 class BpftraceClient:
-
     def __init__(self, target: SshTarget, config: BpftraceConfig):
+        self.id = str(uuid.uuid4())
         self.target = target
         self.config = config
         self.ssh = paramiko.SSHClient()
@@ -71,7 +82,7 @@ class BpftraceClient:
     def start(self) -> int:
         bpftrace_cmd = (
             f"sudo bash -c 'BPFTRACE_MAX_MAP_KEYS=9999999 nohup {self.config.bpftrace_path} {self.remote_script_path} {self.config.bpftrace_additional_args} "
-            + "> /tmp/probe.out 2>&1 & echo $!'"
+            + f"> /tmp/probe-{self.id}.out 2>&1 & echo $!'"
         )
         print(f"Running bpftrace command: {bpftrace_cmd}")
         _, stdout, _ = self.ssh.exec_command(bpftrace_cmd)
@@ -100,24 +111,24 @@ class BpftraceClient:
         self.remote_trace_pid = None
 
         if self.config.parse_script is None:
-            _, stdout, _ = self.ssh.exec_command("cat /tmp/probe.out")
+            _, stdout, _ = self.ssh.exec_command(f"cat /tmp/probe-{self.id}.out")
             raw = stdout.read().decode()
             return raw
         else:
             print("Running bpftrace parse script")
             _, stdout, _ = self.ssh.exec_command(
-                f"{self.remote_parse_script_path} /tmp/probe.out"
+                f"{self.remote_parse_script_path} /tmp/probe-{self.id}.out"
             )
             raw = stdout.read().decode()
             return raw
 
     def cleanup(self):
         self.ssh.close()
-    
+
     @property
     def remote_script_path(self) -> str:
         return f"/tmp/{self.config.name}.bt"
-    
+
     @property
     def remote_parse_script_path(self) -> str:
         return f"/tmp/{self.config.name}_parse.py"

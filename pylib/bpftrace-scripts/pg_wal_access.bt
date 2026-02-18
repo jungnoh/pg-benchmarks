@@ -1,0 +1,82 @@
+BEGIN
+{
+    // $ stat -c '%d' /mnt/psql/18
+    // 66305
+    $st = (uint64)66305;
+    @_target_dev = ((($st >> 8) & 0xFFF) << 20) | ($st & 0xFF) | (($st >> 12) & 0xFFF00);
+    printf("Tracing UID %d, dev %u\n", $1, @_target_dev);
+    printf("Press Ctrl-C to stop and display results.\n\n");
+    @_start_time = nsecs;
+    @_total_reads = 0;
+    @_total_read_bytes = 0;
+    @_total_writes = 0;
+    @_total_write_bytes = 0;
+
+    @_wal_reads = 0;
+    @_wal_read_bytes = 0;
+    @_wal_writes = 0;
+    @_wal_write_bytes = 0;
+}
+
+kprobe:vfs_read /uid == $1/
+{
+    $file = (struct file *)arg0;
+    $inode = $file->f_inode;
+
+    if (($inode->i_mode & 0xF000) != 0x8000) {
+        return;
+    }
+    if ((uint64)$inode->i_sb->s_dev != @_target_dev) {
+        return;
+    }
+    if ((uint64)arg2 == 0) {
+        return;
+    }
+
+    @_total_reads++;
+    @_total_read_bytes += (uint64)arg2;
+
+    $fname = str($file->f_path.dentry->d_name.name);
+    if (strncmp($fname, "0000000", 7) != 0) {
+        return;
+    }
+    
+    @_wal_reads++;
+    @_wal_read_bytes += (uint64)arg2;
+
+    $size = *(int64 *)arg2;
+    $pos = *(int64 *)arg3;
+    printf("R/%lld/%s/%lld/%lld\n", nsecs - @_start_time, $fname, $pos, $size);
+}
+    
+kprobe:vfs_write /uid == $1/
+{
+    $file = (struct file *)arg0;
+    $inode = $file->f_inode;
+
+    if (($inode->i_mode & 0xF000) != 0x8000) {
+        return;
+    }
+    if ((uint64)$inode->i_sb->s_dev != @_target_dev) {
+        return;
+    }
+    if ((uint64)arg2 == 0) {
+        return;
+    }
+
+    @_total_writes++;
+    @_total_write_bytes += (uint64)arg2;
+
+    $fname = str($file->f_path.dentry->d_name.name);
+    if (strncmp($fname, "0000000", 7) != 0) {
+        return;
+    }
+
+    @_wal_writes++;
+    @_wal_write_bytes += (uint64)arg2;
+
+    $pos = *(int64 *)arg3;
+    $size = (uint64)arg2;
+    printf("W/%lld/%s/%lld/%lld\n", nsecs - @_start_time, $fname, $pos, $size);
+}
+    

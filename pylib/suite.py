@@ -9,7 +9,7 @@ from . import target_actions as actions
 from . import target_run as run
 from . import vmstat
 from .bpftrace import BpftraceClient, BpftraceConfig
-from typing import Optional
+from typing import Optional, List
 
 
 def config_to_bool(config: Dict[str, str], key: str, default: bool = False) -> bool:
@@ -46,7 +46,7 @@ class Suite(ABC):
 
 
 class SuiteRunner(ABC):
-    bpftrace_client: Optional[BpftraceClient] = None
+    bpftrace_clients: List[BpftraceClient] = []
 
     def __init__(self, config_file: str, suite: Suite):
         self.config = read_config_file(config_file)
@@ -79,11 +79,14 @@ class SuiteRunner(ABC):
 
         if config_to_bool(self.config, "BPFTRACE_PG_PAGE_INTERVALS", False):
             bpftrace_config = BpftraceConfig.pg_page_intervals(self.config)
-            self.bpftrace_client = BpftraceClient(
-                self.suite.ssh_target, bpftrace_config
+            self.bpftrace_clients.append(
+                BpftraceClient(self.suite.ssh_target, bpftrace_config)
             )
-        else:
-            self.bpftrace_client = None
+        if config_to_bool(self.config, "BPFTRACE_PG_WAL_ACCESS", False):
+            bpftrace_config = BpftraceConfig.pg_wal_access(self.config)
+            self.bpftrace_clients.append(
+                BpftraceClient(self.suite.ssh_target, bpftrace_config)
+            )
 
     def run(self) -> None:
         self._run_before()
@@ -133,11 +136,11 @@ class SuiteRunner(ABC):
             log=self.suite.log_config("before/vmstat"),
         )
 
-        if self.bpftrace_client is not None:
-            print(f"Before: Preparing bpftrace client")
-            self.bpftrace_client.prepare(log=self.suite.log_config("before/bpftrace"))
-            print(f"Before: Running bpftrace script")
-            self.bpftrace_client.start()
+        for bc in self.bpftrace_clients:
+            print(f"Before: Preparing bpftrace client '{bc.config.name}'")
+            bc.prepare(log=self.suite.log_config(f"before/bpftrace-{bc.config.name}"))
+            print(f"Before: Running bpftrace script '{bc.config.name}'")
+            bc.start()
 
     def _run_after(self) -> None:
         print("After: Log /proc/vmstat")
@@ -157,16 +160,19 @@ class SuiteRunner(ABC):
             self.suite.pg_admin_target, log=self.suite.log_config("after/waits")
         )
 
-        if self.bpftrace_client is not None:
-            print(f"After: Stopping bpftrace script")
-            raw = self.bpftrace_client.stop()
-            print(f"After: Writing bpftrace output to file")
+        for bc in self.bpftrace_clients:
+            print(f"After: Stopping bpftrace script '{bc.config.name}'")
+            raw = bc.stop()
+            print(f"After: Writing bpftrace output to file '{bc.config.name}'")
             with open(
-                self.suite.log_config("after/bpftrace").log_file_path(), "w"
+                self.suite.log_config(
+                    f"after/bpftrace-{bc.config.name}"
+                ).log_file_path(),
+                "w",
             ) as f:
                 f.write(raw)
             print(f"After: Cleaning up bpftrace client")
-            self.bpftrace_client.cleanup()
+            bc.cleanup()
 
         print("After: Diff vmstat")
         vmstat.diff(

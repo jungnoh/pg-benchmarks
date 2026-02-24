@@ -1,9 +1,8 @@
 import subprocess
 from subprocess_tee import run as run_tee
-import sys
 import tempfile
-import time
 import os
+from pathlib import Path
 from dataclasses import dataclass
 from typing import List, Optional
 
@@ -14,14 +13,17 @@ class LogConfig:
     action: str
     log_root_dir: str = "logs"
 
+    def log_file_folder(self) -> str:
+        return f"{self.log_root_dir}/{self.run_id}"
+
     def log_file_path(self) -> str:
         if "." in self.action:
-            return f"{self.log_root_dir}/{self.run_id}/{self.action}"
+            return f"{self.log_file_folder()}/{self.action}"
         else:
-            return f"{self.log_root_dir}/{self.run_id}/{self.action}.log"
+            return f"{self.log_file_folder()}/{self.action}.log"
 
     def ensure_log_folder(self) -> None:
-        os.makedirs(os.path.dirname(self.log_file_path()), exist_ok=True)
+        os.makedirs(Path(self.log_file_path()).parent, exist_ok=True)
 
 
 def shell_command(
@@ -42,7 +44,7 @@ def shell_command(
             stderr=subprocess.STDOUT,
             **kwargs,
         )
-        with open(log_file_path, "a") as f:
+        with open(log_file_path, "w") as f:
             if result.stdout is not None:
                 f.write(result.stdout)
         return result
@@ -101,6 +103,19 @@ def ssh_copy_file(
         scp_cmd = f"scp -P {target.port} {source} {target.username}@{target.hostname}:{destination}"
     else:
         scp_cmd = f"sshpass -p {target.password} scp -P {target.port} {source} {target.username}@{target.hostname}:{destination}"
+    return shell_command(scp_cmd, log)
+
+
+def ssh_retrieve_file(
+    target: SshTarget, source: str, destination: str, log: Optional[LogConfig] = None
+) -> subprocess.CompletedProcess:
+    """
+    Retrieves a file from a remote server.
+    """
+    if target.password is None:
+        scp_cmd = f"scp -P {target.port} {target.username}@{target.hostname}:{source} {destination}"
+    else:
+        scp_cmd = f"sshpass -p {target.password} scp -P {target.port} {target.username}@{target.hostname}:{source} {destination}"
     return shell_command(scp_cmd, log)
 
 

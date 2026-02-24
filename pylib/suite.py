@@ -162,15 +162,10 @@ class SuiteRunner(ABC):
 
         for bc in self.bpftrace_clients:
             print(f"After: Stopping bpftrace script '{bc.config.name}'")
-            raw = bc.stop()
-            print(f"After: Writing bpftrace output to file '{bc.config.name}'")
-            with open(
-                self.suite.log_config(
-                    f"after/bpftrace-{bc.config.name}"
-                ).log_file_path(),
-                "w",
-            ) as f:
-                f.write(raw)
+            bc.stop(
+                f"bpftrace-{bc.config.name}",
+                self.suite.log_config(f"bpftrace-{bc.config.name}"),
+            )
             print(f"After: Cleaning up bpftrace client")
             bc.cleanup()
 

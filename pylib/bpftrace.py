@@ -1,6 +1,6 @@
 import paramiko
 from dataclasses import dataclass
-from .target_run import SshTarget, LogConfig, ssh_copy_file
+from .target_run import SshTarget, LogConfig, ssh_copy_file, ssh_retrieve_file
 from typing import Optional, Dict
 import time
 from pathlib import Path
@@ -25,10 +25,13 @@ class BpftraceConfig:
 
     def pg_wal_access(config: Dict[str, str]) -> "BpftraceConfig":
         script_path = SCRIPT_DIR / "pg_wal_access.bt"
+        parse_script = SCRIPT_DIR / "pg_wal_access_parse.py"
         cfg = BpftraceConfig(
             name="pg_wal_access",
             script_path=script_path,
-            parse_script=None,
+            parse_script=parse_script,
+            parse_output_path="/tmp/pg_wal_access.png",
+            result_extension="png",
             bpftrace_additional_args="$(id -u postgres)",
         )
         return cfg._apply_config(config)
@@ -43,6 +46,8 @@ class BpftraceConfig:
     name: str
     script_path: str
     parse_script: Optional[str] = None
+    parse_output_path: Optional[str] = None
+    result_extension: str = "log"
     bpftrace_path: str = "/home/jungnoh/bpftrace"
     bpftrace_additional_args: str = ""
     cleanup_timeout: int = 300
@@ -91,7 +96,7 @@ class BpftraceClient:
         self.remote_trace_pid = pid
         time.sleep(2)  # let probes attach
 
-    def stop(self) -> str:
+    def stop(self, output_path: str, log: LogConfig) -> str:
         if self.remote_trace_pid is None:
             print("No bpftrace script is running")
             return
@@ -116,11 +121,31 @@ class BpftraceClient:
             return raw
         else:
             print("Running bpftrace parse script")
-            _, stdout, _ = self.ssh.exec_command(
-                f"{self.remote_parse_script_path} /tmp/probe-{self.id}.out"
+            output_path = (
+                Path(log.log_file_folder())
+                / "after"
+                / f"bpftrace-{self.config.name}"
+                / f"{output_path}.{self.config.result_extension}"
             )
-            raw = stdout.read().decode()
-            return raw
+            output_path.parent.mkdir(parents=True, exist_ok=True)
+            if self.config.parse_output_path is None:
+                _, stdout, _ = self.ssh.exec_command(
+                    f"{self.remote_parse_script_path} /tmp/probe-{self.id}.out"
+                )
+                raw = stdout.read().decode()
+                with open(output_path, "w") as f:
+                    f.write(raw)
+            else:
+                _, stdout, stderr = self.ssh.exec_command(
+                    f"{self.remote_parse_script_path} /tmp/probe-{self.id}.out"
+                )
+                print(stdout.read().decode())
+                print(stderr.read().decode())
+                ssh_retrieve_file(
+                    self.target,
+                    self.config.parse_output_path,
+                    str(output_path),
+                )
 
     def cleanup(self):
         self.ssh.close()

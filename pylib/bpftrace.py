@@ -128,16 +128,17 @@ class BpftraceClient:
                 / f"{output_path}.{self.config.result_extension}"
             )
             output_path.parent.mkdir(parents=True, exist_ok=True)
+            raw_log_remote_path = f"/tmp/probe-{self.id}.out"
             if self.config.parse_output_path is None:
                 _, stdout, _ = self.ssh.exec_command(
-                    f"{self.remote_parse_script_path} /tmp/probe-{self.id}.out"
+                    f"{self.remote_parse_script_path} {raw_log_remote_path}"
                 )
                 raw = stdout.read().decode()
                 with open(output_path, "w") as f:
                     f.write(raw)
             else:
                 _, stdout, stderr = self.ssh.exec_command(
-                    f"{self.remote_parse_script_path} /tmp/probe-{self.id}.out"
+                    f"{self.remote_parse_script_path} {raw_log_remote_path}"
                 )
                 print(stdout.read().decode())
                 print(stderr.read().decode())
@@ -145,6 +146,11 @@ class BpftraceClient:
                     self.target,
                     self.config.parse_output_path,
                     str(output_path),
+                )
+                ssh_retrieve_file(
+                    self.target,
+                    raw_log_remote_path,
+                    str(output_path.parent / "raw.log"),
                 )
 
     def cleanup(self):

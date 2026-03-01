@@ -3,8 +3,9 @@
 QEMU_SSH_PORT=5555
 QEMU_GDB_PORT=1235
 
-BOOT_IMG_PATH=~/cache_ext/linux/arch/x86/boot/bzImage
-KERNEL_IMG_PATH=~/djournalplus.code/tools/qemu/vm_imgs/qemu-image.qcow2
+BOOT_IMG_PATH=/home/jungnoh/cache_ext/linux/arch/x86/boot/bzImage
+KERNEL_IMG_PATH=/home/jungnoh/djournalplus.code/tools/qemu/vm_imgs/qemu-image.qcow2
+VM_SHARED_PATH=/home/jungnoh/pg-benchmarks/vm-shared
 
 PSQL_VM_PORT=5432
 PSQL_HOST_PORT=35432
@@ -35,7 +36,9 @@ case "$1" in
             -device virtio-net-pci,netdev=net0 \
             -mem-prealloc \
             -gdb tcp::$QEMU_GDB_PORT  \
-            -device vfio-pci,host=$NVME_PCIE_ADDR
+            -device vfio-pci,host=$NVME_PCIE_ADDR \
+            -virtfs local,path=$VM_SHARED_PATH,mount_tag=hostshare,security_model=mapped-xattr
+            # Mount with: sudo mkdir -p /mnt/hostshare && sudo mount -t 9p -o trans=virtio hostshare /mnt/hostshare
         ;;
     stop)
         sudo pkill -9 qemu-system-x86

@@ -6,3 +6,4 @@ venv
 !conf-examples/*.conf
 hammerdb-scripts/
 *.tar.gz
+vm-shared

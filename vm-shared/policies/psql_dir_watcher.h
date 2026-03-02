@@ -21,7 +21,7 @@
 #define watch_dir_path_map(skel)		((skel)->rodata->watch_dir_path)
 #define watch_dir_path_len_map(skel)	((skel)->rodata->watch_dir_path_len)
 
-int initialize_watch_dir_map(const char *path, int watch_dir_map_fd, bool recursive) {
+int initialize_watch_dir_map(const char *path, int watch_dir_map_fd, int wal_watchlist_map_fd, bool recursive) {
 	int ret;
 	DIR *dir;
 	struct dirent *ent;
@@ -57,7 +57,7 @@ int initialize_watch_dir_map(const char *path, int watch_dir_map_fd, bool recurs
 			}
 
 			// Recurse for nested directories
-			ret = initialize_watch_dir_map(filepath, watch_dir_map_fd, recursive);
+			ret = initialize_watch_dir_map(filepath, watch_dir_map_fd, wal_watchlist_map_fd, recursive);
 			if (ret < 0) {
 				closedir(dir);
 				free(filepath);
@@ -79,6 +79,16 @@ int initialize_watch_dir_map(const char *path, int watch_dir_map_fd, bool recurs
 			closedir(dir);
 			return -1;
 		}
+
+		if (is_wal_file) {
+            __u8 zero = 0;
+            ret = bpf_map_update_elem(wal_watchlist_map_fd, &ent->d_ino, &zero, 0);
+            if (ret != 0) {
+                perror("Failed to add inode to wal_watchlist");
+                closedir(dir);
+                return -1;
+            }
+        }
 	}
 
 	closedir(dir);

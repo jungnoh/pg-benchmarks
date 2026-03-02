@@ -28,8 +28,21 @@ struct {
     __uint(max_entries, 9999999);
 } inode_watchlist SEC(".maps");
 
+struct {
+    __uint(type, BPF_MAP_TYPE_HASH);
+    __type(key, __u64);
+    // Value indicates whether this inode is a WAL file.
+    __type(value, bool);
+    __uint(max_entries, 9999999);
+} wal_watchlist SEC(".maps");
+
 static inline struct watchlist_state* lookup_ino(u64 inode_no) {
     return (struct watchlist_state*)bpf_map_lookup_elem(&inode_watchlist, &inode_no);
+};
+
+static inline bool ino_is_wal_file(u64 inode_no) {
+    void *ret = bpf_map_lookup_elem(&wal_watchlist, &inode_no);
+    return ret != NULL;
 };
 
 static inline int strncmp(const char *s1, const volatile char *s2, int n) {
@@ -71,13 +84,23 @@ int BPF_PROG(vfs_open_exit, struct path *path, struct file *file, long ret) {
     if (strncmp(filepath, watch_dir_path, watch_dir_path_len) != 0) return 0;
 
     // Add inode to inode_watchlist
+    bool is_wal_file = is_wal_filename(filepath, path_length);
     struct watchlist_state map_value = {
-        .is_wal_file = is_wal_filename(filepath, path_length)
+        .is_wal_file = is_wal_file
     };
     err = bpf_map_update_elem(&inode_watchlist, &inode_no, &map_value, BPF_ANY);
     if (err != 0) {
         bpf_printk("Failed to add inode to inode_watchlist: %ld\n", err);
         return 0;
+    }
+
+    if (is_wal_file) {
+        u8 zero = 0;
+        err = bpf_map_update_elem(&wal_watchlist, &inode_no, &zero, BPF_ANY);
+        if (err != 0) {
+            bpf_printk("Failed to add inode to wal_watchlist: %ld\n", err);
+            return 0;
+        }
     }
 
     return 0;

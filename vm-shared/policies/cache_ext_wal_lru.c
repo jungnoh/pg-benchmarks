@@ -109,7 +109,7 @@ int main(int argc, char **argv)
 	}
 
 	// Initialize watch_dir map
-	ret = initialize_watch_dir_map(watch_dir_full_path, bpf_map__fd(skel->maps.inode_watchlist), true);
+	ret = initialize_watch_dir_map(watch_dir_full_path, bpf_map__fd(skel->maps.inode_watchlist), bpf_map__fd(skel->maps.wal_watchlist), true);
 	if (ret) {
 		perror("Failed to initialize watch_dir map");
 		goto cleanup;

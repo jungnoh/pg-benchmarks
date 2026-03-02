@@ -74,9 +74,10 @@ void BPF_STRUCT_OPS(wal_lru_folio_added, struct folio *folio)
 	}
 
     int ret;
-    if (state->is_wal_file) {
+    unsigned long ino = folio->mapping->host->i_ino;
+    if (ino_is_wal_file(ino)) {
         ret = bpf_cache_ext_list_add_tail(wal_lru_list, folio);
-        wal_lru_inode_accessed(folio->mapping->host->i_ino);
+        wal_lru_inode_accessed(ino);
     } else {
         ret = bpf_cache_ext_list_add_tail(general_lru_list, folio);
     }
@@ -99,10 +100,11 @@ void BPF_STRUCT_OPS(wal_lru_folio_accessed, struct folio *folio)
     }
 
     int ret;
-    if (state->is_wal_file) {
+    unsigned long ino = folio->mapping->host->i_ino;
+    if (ino_is_wal_file(ino)) {
         bpf_printk("cache_ext: WAL LRU folio accessed - ino %lu\n", folio->mapping->host->i_ino);
         ret = bpf_cache_ext_list_move(wal_lru_list, folio, true);
-        wal_lru_inode_accessed(folio->mapping->host->i_ino);
+        wal_lru_inode_accessed(ino);
     } else {
         ret = bpf_cache_ext_list_move(general_lru_list, folio, true);
     }

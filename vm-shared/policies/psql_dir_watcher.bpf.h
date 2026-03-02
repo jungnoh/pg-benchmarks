@@ -72,7 +72,7 @@ int BPF_PROG(vfs_open_exit, struct path *path, struct file *file, long ret) {
         bpf_printk("Failed to get file path: %ld\n", err);
         return 0;
     }
-    int path_length = err;
+    int path_length = err - 1;
 
     u64 inode_no = file->f_inode->i_ino;
 

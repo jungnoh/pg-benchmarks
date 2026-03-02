@@ -1,5 +1,5 @@
-#ifndef _DIR_WATCHER_H
-#define _DIR_WATCHER_H
+#ifndef _PSQL_DIR_WATCHER_H
+#define _PSQL_DIR_WATCHER_H
 
 #include "psql_dir_watcher.common.h"
 #include <argp.h>
@@ -66,8 +66,8 @@ int initialize_watch_dir_map(const char *path, int watch_dir_map_fd, bool recurs
 		}
 
 		bool is_wal_file = is_wal_filename(filepath, (int)strlen(filepath));
-		// fprintf(stderr, "Adding inode %lu to watch_dir map\nFilename: %s, is WAL: %d\n",
-		//         ent->d_ino, filepath, is_wal_file);
+		fprintf(stderr, "Adding inode %lu to watch_dir map\nFilename: %s, is WAL: %d\n",
+		        ent->d_ino, filepath, is_wal_file);
 		free(filepath);
 		struct watchlist_state map_value = {
 		    .is_wal_file = is_wal_file

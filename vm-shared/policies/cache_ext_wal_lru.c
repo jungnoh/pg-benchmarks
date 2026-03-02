@@ -97,6 +97,10 @@ int main(int argc, char **argv)
 		goto cleanup;
 	}
 
+	// Set watch_dir
+	watch_dir_path_len_map(skel) = strlen(watch_dir_full_path);
+	strcpy(watch_dir_path_map(skel), watch_dir_full_path);
+
 	// Load programs
 	ret = cache_ext_wal_lru_bpf__load(skel);
 	if (ret) {
@@ -109,6 +113,12 @@ int main(int argc, char **argv)
 	if (ret) {
 		perror("Failed to initialize watch_dir map");
 		goto cleanup;
+	}
+
+	ret = cache_ext_wal_lru_bpf__attach(skel);
+	if (ret) {
+	    perror("Failed to attach BPF program");
+	    goto cleanup;
 	}
 
 	// Attach cache_ext_ops to the specific cgroup

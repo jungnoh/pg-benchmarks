@@ -1,15 +1,13 @@
-#include "vmlinux.h"
+#include "psql_dir_watcher.bpf.h"
 #include <bpf/bpf_helpers.h>
 #include <bpf/bpf_tracing.h>
 #include <bpf/bpf_core_read.h>
 
 #include "cache_ext_lib.bpf.h"
-#include "psql_dir_watcher.bpf.h"
+#include "vmlinux.h"
 
 char _license[] SEC("license") = "GPL";
 
-
-#define ARRAY_SIZE(x) (sizeof(x) / sizeof((x)[0]))
 
 // #define DEBUG
 #ifdef DEBUG
@@ -18,50 +16,71 @@ char _license[] SEC("license") = "GPL";
 #define dbg_printk(fmt, ...)
 #endif
 
+__u64 general_lru_list;
+__u64 wal_lru_list;
+unsigned long wal_inode_lru[2];
 
-inline bool is_folio_relevant(struct folio *folio)
+inline void wal_lru_inode_accessed(unsigned long ino) {
+    if (wal_inode_lru[0] == ino) {
+        return;
+    }
+    wal_inode_lru[1] = wal_inode_lru[0];
+    wal_inode_lru[0] = ino;
+}
+
+inline bool inode_in_wal_lru(unsigned long ino) {
+    return ino == wal_inode_lru[0] || ino == wal_inode_lru[1];
+}
+
+inline struct watchlist_state* lookup_folio(struct folio *folio)
 {
 	if (!folio) {
-		return false;
+		return NULL;
 	}
 	if (folio->mapping == NULL) {
-		return false;
+		return NULL;
 	}
 	if (folio->mapping->host == NULL) {
-		return false;
+		return NULL;
 	}
-	bool res = inode_in_watchlist(folio->mapping->host->i_ino);
-	return res;
+	return lookup_ino(folio->mapping->host->i_ino);
 }
 
-// Assumes that is_folio_relevant is true
-inline bool is_wal_folio(struct folio *folio)
-{
-
-}
-
-__u64 lru_list;
 
 s32 BPF_STRUCT_OPS_SLEEPABLE(wal_lru_init, struct mem_cgroup *memcg)
 {
-	dbg_printk("cache_ext: Hi from the wal_lru_init hook! :D\n");
-	lru_list = bpf_cache_ext_ds_registry_new_list(memcg);
-	if (lru_list == 0) {
-		bpf_printk("cache_ext: Failed to create lru_list\n");
+	general_lru_list = bpf_cache_ext_ds_registry_new_list(memcg);
+	if (general_lru_list == 0) {
+		bpf_printk("cache_ext: Failed to create general_lru_list\n");
 		return -1;
 	}
-	bpf_printk("cache_ext: Created lru_list: %llu\n", lru_list);
+	bpf_printk("cache_ext: Created general_lru_list: %llu\n", general_lru_list);
+
+	wal_lru_list = bpf_cache_ext_ds_registry_new_list(memcg);
+	if (wal_lru_list == 0) {
+		bpf_printk("cache_ext: Failed to create wal_lru_list\n");
+		return -1;
+	}
+	bpf_printk("cache_ext: Created wal_lru_list: %llu\n", wal_lru_list);
+
 	return 0;
 }
 
 void BPF_STRUCT_OPS(wal_lru_folio_added, struct folio *folio)
 {
-	dbg_printk("cache_ext: Hi from the wal_lru_folio_added hook! :D\n");
-	if (!is_folio_relevant(folio)) {
+    struct watchlist_state* state = lookup_folio(folio);
+    if (state == NULL) {
 		return;
 	}
 
-	int ret = bpf_cache_ext_list_add_tail(lru_list, folio);
+    int ret;
+    if (state->is_wal_file) {
+        ret = bpf_cache_ext_list_add_tail(wal_lru_list, folio);
+        wal_lru_inode_accessed(folio->mapping->host->i_ino);
+    } else {
+        ret = bpf_cache_ext_list_add_tail(general_lru_list, folio);
+    }
+
 	if (ret != 0) {
 		bpf_printk("cache_ext: Failed to add folio to lru_list\n");
 		return;
@@ -71,14 +90,23 @@ void BPF_STRUCT_OPS(wal_lru_folio_added, struct folio *folio)
 
 void BPF_STRUCT_OPS(wal_lru_folio_accessed, struct folio *folio)
 {
-	int ret;
 	dbg_printk("cache_ext: Hi from the wal_lru_folio_accessed hook! :D\n");
 
-	if (!is_folio_relevant(folio)) {
-		return;
-	}
 
-	ret = bpf_cache_ext_list_move(lru_list, folio, true);
+	struct watchlist_state* state = lookup_folio(folio);
+    if (state == NULL) {
+        return;
+    }
+
+    int ret;
+    if (state->is_wal_file) {
+        bpf_printk("cache_ext: WAL LRU folio accessed - ino %lu\n", folio->mapping->host->i_ino);
+        ret = bpf_cache_ext_list_move(wal_lru_list, folio, true);
+        wal_lru_inode_accessed(folio->mapping->host->i_ino);
+    } else {
+        ret = bpf_cache_ext_list_move(general_lru_list, folio, true);
+    }
+
 	if (ret != 0) {
 		bpf_printk("cache_ext: Failed to move folio to lru_list tail\n");
 		return;
@@ -93,9 +121,27 @@ void BPF_STRUCT_OPS(wal_lru_folio_evicted, struct folio *folio)
 	bpf_cache_ext_list_del(folio);
 }
 
-static int iterate_wal_lru(int idx, struct cache_ext_list_node *node)
+static int iterate_wal_lru_list(int idx, struct cache_ext_list_node *node)
 {
-	if ((idx < 200) && (!folio_test_uptodate(node->folio) || !folio_test_lru(node->folio))) {
+    // Check if the folio of the node is file-backed.
+    // This shouldn't hit considering the nature of folios in the list, but just being safe
+    if (node->folio == NULL || node->folio->mapping == NULL || node->folio->mapping->host == NULL) {
+	    return CACHE_EXT_CONTINUE_ITER;
+	}
+	if (!folio_test_uptodate(node->folio) || !folio_test_lru(node->folio)) {
+		return CACHE_EXT_CONTINUE_ITER;
+	}
+	unsigned long ino = node->folio->mapping->host->i_ino;
+	if (inode_in_wal_lru(ino)) {
+	    return CACHE_EXT_CONTINUE_ITER;
+	}
+	bpf_printk("cache_ext: Evicting WAL folio for ino %lu\n", ino);
+	return CACHE_EXT_EVICT_NODE;
+}
+
+static int iterate_general_lru_list(int idx, struct cache_ext_list_node *node)
+{
+	if (!folio_test_uptodate(node->folio) || !folio_test_lru(node->folio)) {
 		return CACHE_EXT_CONTINUE_ITER;
 	}
 	return CACHE_EXT_EVICT_NODE;
@@ -105,7 +151,16 @@ void BPF_STRUCT_OPS(wal_lru_evict_folios, struct cache_ext_eviction_ctx *evictio
 	       struct mem_cgroup *memcg)
 {
 	dbg_printk("cache_ext: Hi from the wal_lru_evict_folios hook! :D\n");
-	int ret = bpf_cache_ext_list_iterate(memcg, lru_list, iterate_wal_lru,
+	int ret = bpf_cache_ext_list_iterate(memcg, wal_lru_list, iterate_wal_lru_list,
+					     eviction_ctx);
+	if (ret < 0) {
+		bpf_printk("cache_ext: Failed to evict folios\n");
+	}
+	if (eviction_ctx->request_nr_folios_to_evict <= eviction_ctx->nr_folios_to_evict) {
+		return;
+	}
+
+	ret = bpf_cache_ext_list_iterate(memcg, general_lru_list, iterate_general_lru_list,
 					     eviction_ctx);
 	// Check that the right amount of folios were evicted
 	if (ret < 0) {

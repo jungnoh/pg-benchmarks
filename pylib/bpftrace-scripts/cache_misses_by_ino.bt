@@ -1,0 +1,44 @@
+BEGIN
+{
+    // $ stat -c '%d' /mnt/psql/18
+    // 66305
+    $st = (uint64)66305;
+    @_target_dev = ((($st >> 8) & 0xFFF) << 20) | ($st & 0xFF) | (($st >> 12) & 0xFFF00);
+    printf("Tracing UID %d, dev %u\n", $1, @_target_dev);
+    printf("Press Ctrl-C to stop and display results.\n\n");
+}
+
+tracepoint:filemap:mm_filemap_add_to_page_cache
+/comm == "postgres"/
+{
+    if (args->s_dev == @_target_dev) {
+        @misses[args->i_ino] = count();
+    }
+}
+
+kprobe:vfs_open
+/comm == "postgres"/
+{
+    $path = (struct path *)arg0;
+    $dent = $path->dentry;
+    $inode = $dent->d_inode;
+
+    @inode_path[$inode->i_ino] = str($dent->d_name.name);
+}
+
+END
+{
+    for ($kv : @misses) {
+        $ino = $kv.0;
+        $cnt = $kv.1;
+        $path_str = @inode_path[$ino];
+        if (strlen($path_str) == 0) {
+            printf("%-12lu\t%-8lu\t?? (%lu)\n", $ino, $cnt, $ino);
+        } else {
+            printf("%-12lu\t%-8lu\t%s\n", $ino, $cnt, $path_str);
+        }
+    }
+
+    clear(@inode_path);
+    clear(@misses);
+}

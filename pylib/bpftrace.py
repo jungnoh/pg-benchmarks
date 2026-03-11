@@ -1,11 +1,13 @@
-import paramiko
-from dataclasses import dataclass
-from .target_run import SshTarget, LogConfig, ssh_copy_file, ssh_retrieve_file
-from typing import Optional, Dict
 import time
-from pathlib import Path
 import uuid
+from dataclasses import dataclass
+from pathlib import Path
+from sre_parse import parse
+from typing import Dict, Optional
 
+import paramiko
+
+from .target_run import LogConfig, SshTarget, ssh_copy_file, ssh_retrieve_file
 
 SCRIPT_DIR = Path(__file__).parent / "bpftrace-scripts"
 
@@ -32,6 +34,17 @@ class BpftraceConfig:
             parse_script=parse_script,
             parse_output_path="/tmp/pg_wal_access.png",
             result_extension="png",
+            bpftrace_additional_args="$(id -u postgres)",
+        )
+        return cfg._apply_config(config)
+
+    def cache_misses_by_ino(config: Dict[str, str]) -> "BpftraceConfig":
+        script_path = SCRIPT_DIR / "cache_misses_by_ino.bt"
+        parse_script = SCRIPT_DIR / "cache_misses_by_ino_parse.py"
+        cfg = BpftraceConfig(
+            name="cache_misses_by_ino",
+            script_path=script_path,
+            parse_script=parse_script,
             bpftrace_additional_args="$(id -u postgres)",
         )
         return cfg._apply_config(config)
@@ -115,26 +128,27 @@ class BpftraceClient:
             time.sleep(0.5)
         self.remote_trace_pid = None
 
+        output_folder = (
+            Path(log.log_file_folder()) / "after" / f"bpftrace-{self.config.name}"
+        )
+        output_folder.mkdir(parents=True, exist_ok=True)
+        raw_log_remote_path = f"/tmp/probe-{self.id}.out"
         if self.config.parse_script is None:
-            _, stdout, _ = self.ssh.exec_command(f"cat /tmp/probe-{self.id}.out")
-            raw = stdout.read().decode()
-            return raw
+            ssh_retrieve_file(
+                self.target,
+                raw_log_remote_path,
+                str(output_folder / "raw.log"),
+            )
         else:
             print("Running bpftrace parse script")
-            output_path = (
-                Path(log.log_file_folder())
-                / "after"
-                / f"bpftrace-{self.config.name}"
-                / f"{output_path}.{self.config.result_extension}"
-            )
-            output_path.parent.mkdir(parents=True, exist_ok=True)
-            raw_log_remote_path = f"/tmp/probe-{self.id}.out"
             if self.config.parse_output_path is None:
                 _, stdout, _ = self.ssh.exec_command(
                     f"{self.remote_parse_script_path} {raw_log_remote_path}"
                 )
                 raw = stdout.read().decode()
-                with open(output_path, "w") as f:
+                with open(
+                    str(output_folder / f"parsed.{self.config.result_extension}"), "w"
+                ) as f:
                     f.write(raw)
             else:
                 _, stdout, stderr = self.ssh.exec_command(
@@ -145,12 +159,12 @@ class BpftraceClient:
                 ssh_retrieve_file(
                     self.target,
                     self.config.parse_output_path,
-                    str(output_path),
+                    str(output_folder / "raw.log"),
                 )
                 ssh_retrieve_file(
                     self.target,
                     raw_log_remote_path,
-                    str(output_path.parent / "raw.log"),
+                    str(output_folder / f"parsed.{self.config.result_extension}"),
                 )
 
     def cleanup(self):

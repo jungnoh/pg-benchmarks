@@ -1,15 +1,15 @@
-from abc import ABC, abstractmethod
-import time
 import math
+import time
+from abc import ABC, abstractmethod
 from pathlib import Path
-from typing import Dict
-from .target_run import SshTarget, PgTarget, LogConfig
-from .util import read_config_file
+from typing import Dict, List, Optional
+
 from . import target_actions as actions
 from . import target_run as run
 from . import vmstat
 from .bpftrace import BpftraceClient, BpftraceConfig
-from typing import Optional, List
+from .target_run import LogConfig, PgTarget, SshTarget
+from .util import read_config_file
 
 
 def config_to_bool(config: Dict[str, str], key: str, default: bool = False) -> bool:
@@ -77,6 +77,11 @@ class SuiteRunner(ABC):
             self.config, "PG_OPTIMIZE_CONFIGS", False
         )
 
+        if config_to_bool(self.config, "BPFTRACE_CACHE_MISSES_BY_INO", False):
+            bpftrace_config = BpftraceConfig.cache_misses_by_ino(self.config)
+            self.bpftrace_clients.append(
+                BpftraceClient(self.suite.ssh_target, bpftrace_config)
+            )
         if config_to_bool(self.config, "BPFTRACE_PG_PAGE_INTERVALS", False):
             bpftrace_config = BpftraceConfig.pg_page_intervals(self.config)
             self.bpftrace_clients.append(

@@ -1,17 +1,26 @@
-from pylib.hammerdb import HammerDBConfig, ScriptBuilder, run_script
-from pylib.target_run import LogConfig
-import pylib.suite as suite
 import os
 import sys
 
+import pylib.suite as suite
+from pylib.hammerdb import HammerDBConfig, ScriptBuilder, run_script
+from pylib.target_run import LogConfig
+
 
 class HammerDBSuite(suite.Suite):
+    name_prefix = ""
+
     def __init__(self, config_file: str):
         super().__init__()
         self.config = HammerDBConfig.read_config_file(config_file)
 
     def log_config(self, action: str) -> LogConfig:
-        return LogConfig(run_id=f"hammerdb/{self.start_time:.0f}", action=action)
+        if self.name_prefix == "":
+            return LogConfig(run_id=f"hammerdb/{self.start_time:.0f}", action=action)
+        else:
+            return LogConfig(
+                run_id=f"hammerdb/{self.name_prefix}-{self.start_time:.0f}",
+                action=action,
+            )
 
     def prepare(self):
         os.makedirs("hammerdb-scripts", exist_ok=True)
@@ -54,6 +63,8 @@ if __name__ == "__main__":
     if command == "prepare":
         s.prepare()
     elif command == "run":
+        if len(sys.argv) >= 3:
+            s.name_prefix = sys.argv[2]
         runner.run()
     elif command == "cleanup":
         s.cleanup()

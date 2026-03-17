@@ -39,10 +39,18 @@ class BpftraceConfig:
         script_path = SCRIPT_DIR / "pg_wal_access.bt"
         parsers = [
             BpftraceParseScript(
-                script_path=str(SCRIPT_DIR / "pg_wal_access_parse.py"),
-                output_path="/tmp/pg_wal_access.png",
+                script_path=str(SCRIPT_DIR / "pg_wal_access_overlaps.py"),
+            ),
+            BpftraceParseScript(
+                script_path=str(SCRIPT_DIR / "pg_wal_access_overview.py"),
+                output_path="/tmp/pg_wal_access_overview.png",
                 result_extension="png",
-            )
+            ),
+            BpftraceParseScript(
+                script_path=str(SCRIPT_DIR / "pg_wal_access_files.py"),
+                output_path="/tmp/pg_wal_access_files.png",
+                result_extension="png",
+            ),
         ]
 
         cfg = BpftraceConfig(
@@ -172,7 +180,8 @@ class BpftraceClient:
                 )
                 raw = stdout.read().decode()
                 with open(
-                    str(output_folder / f"parsed.{parser.result_extension}"), "w"
+                    str(output_folder / f"parsed_{i + 1}.{parser.result_extension}"),
+                    "w",
                 ) as f:
                     f.write(raw)
             else:
@@ -183,13 +192,13 @@ class BpftraceClient:
                 print(stderr.read().decode())
                 ssh_retrieve_file(
                     self.target,
-                    parser.output_path,
+                    raw_log_remote_path,
                     str(output_folder / "raw.log"),
                 )
                 ssh_retrieve_file(
                     self.target,
-                    raw_log_remote_path,
-                    str(output_folder / f"parsed.{parser.result_extension}"),
+                    parser.output_path,
+                    str(output_folder / f"parsed_{i + 1}.{parser.result_extension}"),
                 )
 
     def cleanup(self):

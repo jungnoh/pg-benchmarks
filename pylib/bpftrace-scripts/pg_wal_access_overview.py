@@ -4,8 +4,8 @@ import argparse
 import re
 import sys
 
-import matplotlib.pyplot as plt
 import matplotlib.colors as mcolors
+import matplotlib.pyplot as plt
 import numpy as np
 
 LINE_RE = re.compile(r"^([RW])/(\d+)/([\dA-Fa-f]+)/(\d+)/(\d+)$")
@@ -199,7 +199,7 @@ def main():
     print(f"Parsing {args.logfile} ...")
     ops = parse_log(args.logfile)
     print(f"Parsed {len(ops)} I/O operations.")
-    build_figures(ops, "/tmp/pg_wal_access.png")
+    build_figures(ops, "/tmp/pg_wal_access_overview.png")
 
 
 if __name__ == "__main__":

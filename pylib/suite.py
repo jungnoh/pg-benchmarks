@@ -168,10 +168,9 @@ class SuiteRunner(ABC):
         for bc in self.bpftrace_clients:
             print(f"After: Stopping bpftrace script '{bc.config.name}'")
             bc.stop(
-                f"bpftrace-{bc.config.name}",
                 self.suite.log_config(f"bpftrace-{bc.config.name}"),
             )
-            print(f"After: Cleaning up bpftrace client")
+            print(f"After: Cleaning up bpftrace client '{bc.config.name}'")
             bc.cleanup()
 
         print("After: Diff vmstat")

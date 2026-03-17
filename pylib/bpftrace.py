@@ -1,9 +1,8 @@
 import time
 import uuid
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
-from sre_parse import parse
-from typing import Dict, Optional
+from typing import Dict, List, Optional
 
 import paramiko
 
@@ -13,39 +12,59 @@ SCRIPT_DIR = Path(__file__).parent / "bpftrace-scripts"
 
 
 @dataclass
+class BpftraceParseScript:
+    script_path: str
+    output_path: Optional[str] = None
+    result_extension: str = "log"
+
+
+@dataclass
 class BpftraceConfig:
     def pg_page_intervals(config: Dict[str, str]) -> "BpftraceConfig":
         script_path = SCRIPT_DIR / "pg_page_intervals.bt"
-        parse_script = SCRIPT_DIR / "pg_page_intervals_parse.py"
+        parsers = [
+            BpftraceParseScript(
+                script_path=str(SCRIPT_DIR / "pg_page_intervals_parse.py"),
+            )
+        ]
         cfg = BpftraceConfig(
             name="pg_page_intervals",
-            script_path=script_path,
-            parse_script=parse_script,
+            script_path=str(script_path),
             bpftrace_additional_args="$(id -u postgres)",
+            parsers=parsers,
         )
         return cfg._apply_config(config)
 
     def pg_wal_access(config: Dict[str, str]) -> "BpftraceConfig":
         script_path = SCRIPT_DIR / "pg_wal_access.bt"
-        parse_script = SCRIPT_DIR / "pg_wal_access_parse.py"
+        parsers = [
+            BpftraceParseScript(
+                script_path=str(SCRIPT_DIR / "pg_wal_access_parse.py"),
+                output_path="/tmp/pg_wal_access.png",
+                result_extension="png",
+            )
+        ]
+
         cfg = BpftraceConfig(
             name="pg_wal_access",
-            script_path=script_path,
-            parse_script=parse_script,
-            parse_output_path="/tmp/pg_wal_access.png",
-            result_extension="png",
+            script_path=str(script_path),
             bpftrace_additional_args="$(id -u postgres)",
+            parsers=parsers,
         )
         return cfg._apply_config(config)
 
     def cache_misses_by_ino(config: Dict[str, str]) -> "BpftraceConfig":
         script_path = SCRIPT_DIR / "cache_misses_by_ino.bt"
-        parse_script = SCRIPT_DIR / "cache_misses_by_ino_parse.py"
+        parsers = [
+            BpftraceParseScript(
+                script_path=str(SCRIPT_DIR / "cache_misses_by_ino_parse.py"),
+            )
+        ]
         cfg = BpftraceConfig(
             name="cache_misses_by_ino",
-            script_path=script_path,
-            parse_script=parse_script,
+            script_path=str(script_path),
             bpftrace_additional_args="$(id -u postgres)",
+            parsers=parsers,
         )
         return cfg._apply_config(config)
 
@@ -60,6 +79,7 @@ class BpftraceConfig:
     script_path: str
     parse_script: Optional[str] = None
     parse_output_path: Optional[str] = None
+    parsers: List[BpftraceParseScript] = field(default_factory=list)
     result_extension: str = "log"
     bpftrace_path: str = "/home/jungnoh/bpftrace"
     bpftrace_additional_args: str = ""
@@ -80,12 +100,13 @@ class BpftraceClient:
         ssh_copy_file(
             self.target, self.config.script_path, self.remote_script_path, log
         )
-        if self.config.parse_script is not None:
+        for i in range(len(self.config.parsers)):
+            parser = self.config.parsers[i]
             print("Sending bpftrace parse script to the target")
             ssh_copy_file(
                 self.target,
-                self.config.parse_script,
-                self.remote_parse_script_path,
+                parser.script_path,
+                self.remote_parse_script_path(i),
                 log,
             )
         print("Connecting to the target")
@@ -97,7 +118,7 @@ class BpftraceClient:
         )
         print("Connected to the target")
 
-    def start(self) -> int:
+    def start(self):
         bpftrace_cmd = (
             f"sudo bash -c 'BPFTRACE_MAX_MAP_KEYS=9999999 nohup {self.config.bpftrace_path} {self.remote_script_path} {self.config.bpftrace_additional_args} "
             + f"> /tmp/probe-{self.id}.out 2>&1 & echo $!'"
@@ -109,7 +130,7 @@ class BpftraceClient:
         self.remote_trace_pid = pid
         time.sleep(2)  # let probes attach
 
-    def stop(self, output_path: str, log: LogConfig) -> str:
+    def stop(self, log: LogConfig):
         if self.remote_trace_pid is None:
             print("No bpftrace script is running")
             return
@@ -133,38 +154,42 @@ class BpftraceClient:
         )
         output_folder.mkdir(parents=True, exist_ok=True)
         raw_log_remote_path = f"/tmp/probe-{self.id}.out"
-        if self.config.parse_script is None:
+
+        if len(self.config.parsers) == 0:
             ssh_retrieve_file(
                 self.target,
                 raw_log_remote_path,
                 str(output_folder / "raw.log"),
             )
-        else:
-            print("Running bpftrace parse script")
-            if self.config.parse_output_path is None:
+        for i in range(len(self.config.parsers)):
+            parser = self.config.parsers[i]
+            print(
+                f"Running bpftrace parse script [{i + 1}/{len(self.config.parsers)}]: {parser.script_path}"
+            )
+            if parser.output_path is None:
                 _, stdout, _ = self.ssh.exec_command(
-                    f"{self.remote_parse_script_path} {raw_log_remote_path}"
+                    f"{self.remote_parse_script_path(i)} {raw_log_remote_path}"
                 )
                 raw = stdout.read().decode()
                 with open(
-                    str(output_folder / f"parsed.{self.config.result_extension}"), "w"
+                    str(output_folder / f"parsed.{parser.result_extension}"), "w"
                 ) as f:
                     f.write(raw)
             else:
                 _, stdout, stderr = self.ssh.exec_command(
-                    f"{self.remote_parse_script_path} {raw_log_remote_path}"
+                    f"{self.remote_parse_script_path(i)} {raw_log_remote_path}"
                 )
                 print(stdout.read().decode())
                 print(stderr.read().decode())
                 ssh_retrieve_file(
                     self.target,
-                    self.config.parse_output_path,
+                    parser.output_path,
                     str(output_folder / "raw.log"),
                 )
                 ssh_retrieve_file(
                     self.target,
                     raw_log_remote_path,
-                    str(output_folder / f"parsed.{self.config.result_extension}"),
+                    str(output_folder / f"parsed.{parser.result_extension}"),
                 )
 
     def cleanup(self):
@@ -174,6 +199,5 @@ class BpftraceClient:
     def remote_script_path(self) -> str:
         return f"/tmp/{self.config.name}.bt"
 
-    @property
-    def remote_parse_script_path(self) -> str:
-        return f"/tmp/{self.config.name}_parse.py"
+    def remote_parse_script_path(self, idx: int) -> str:
+        return f"/tmp/{self.config.name}_{idx}_parse.py"

@@ -1,10 +1,11 @@
-import subprocess
-from subprocess_tee import run as run_tee
-import tempfile
 import os
-from pathlib import Path
+import subprocess
+import tempfile
 from dataclasses import dataclass
+from pathlib import Path
 from typing import List, Optional
+
+from subprocess_tee import run as run_tee
 
 
 @dataclass
@@ -126,6 +127,7 @@ class PgTarget:
     hostname: str = "localhost"
     port: int = 5432
     database: str = "postgres"
+    log_folder: Optional[str] = "/mnt/psql/18/log"
 
 
 def pg_query(

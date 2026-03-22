@@ -77,6 +77,11 @@ class SuiteRunner(ABC):
             self.config, "PG_OPTIMIZE_CONFIGS", False
         )
 
+        if config_to_bool(self.config, "BPFTRACE_RECLAIM_TS", False):
+            bpftrace_config = BpftraceConfig.reclaim_ts(self.config)
+            self.bpftrace_clients.append(
+                BpftraceClient(self.suite.ssh_target, bpftrace_config)
+            )
         if config_to_bool(self.config, "BPFTRACE_CACHE_MISSES_BY_INO", False):
             bpftrace_config = BpftraceConfig.cache_misses_by_ino(self.config)
             self.bpftrace_clients.append(
@@ -148,6 +153,15 @@ class SuiteRunner(ABC):
             bc.start()
 
     def _run_after(self) -> None:
+        if self.suite.pg_admin_target.log_folder is not None:
+            print("After: Collecting PostgreSQL logs")
+            log_folder = self.suite.pg_admin_target.log_folder
+            actions.ssh_command(
+                self.suite.ssh_target,
+                f'sudo cat {log_folder}/"$(sudo ls -t {log_folder} | head -n1)"',
+                log=self.suite.log_config("after/pg_logs"),
+            )
+
         print("After: Log /proc/vmstat")
         run.ssh_command(
             self.suite.ssh_target,

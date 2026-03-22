@@ -20,6 +20,20 @@ class BpftraceParseScript:
 
 @dataclass
 class BpftraceConfig:
+    def reclaim_ts(config: Dict[str, str]) -> "BpftraceConfig":
+        script_path = SCRIPT_DIR / "reclaim_ts.bt"
+        parsers = [
+            BpftraceParseScript(
+                script_path=str(SCRIPT_DIR / "reclaim_ts_graph.py"),
+                output_path="/tmp/reclaim_ts.png",
+                result_extension="png",
+            )
+        ]
+        cfg = BpftraceConfig(
+            name="reclaim_ts", script_path=str(script_path), parsers=parsers
+        )
+        return cfg._apply_config(config)
+
     def pg_page_intervals(config: Dict[str, str]) -> "BpftraceConfig":
         script_path = SCRIPT_DIR / "pg_page_intervals.bt"
         parsers = [
@@ -46,11 +60,11 @@ class BpftraceConfig:
                 output_path="/tmp/pg_wal_access_overview.png",
                 result_extension="png",
             ),
-            BpftraceParseScript(
-                script_path=str(SCRIPT_DIR / "pg_wal_access_files.py"),
-                output_path="/tmp/pg_wal_access_files.png",
-                result_extension="png",
-            ),
+            # BpftraceParseScript(
+            #     script_path=str(SCRIPT_DIR / "pg_wal_access_files.py"),
+            #     output_path="/tmp/pg_wal_access_files.png",
+            #     result_extension="png",
+            # ),
         ]
 
         cfg = BpftraceConfig(

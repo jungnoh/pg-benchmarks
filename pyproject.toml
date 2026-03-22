@@ -4,6 +4,7 @@ version = "0.1.0"
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
+    "matplotlib>=3.10.8",
     "paramiko>=4.0.0",
     "subprocess-tee>=0.4.2",
 ]

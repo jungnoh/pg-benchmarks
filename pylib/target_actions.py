@@ -1,7 +1,23 @@
-from .target_run import SshTarget, PgTarget, ssh_command, pg_file, pg_queries, LogConfig
-from typing import Dict, Optional
+import re
 import subprocess
+import uuid
+from datetime import datetime
 from pathlib import Path
+from typing import Dict, Optional
+
+import matplotlib.dates as mdates
+import matplotlib.pyplot as plt
+import paramiko
+
+from .target_run import (
+    LogConfig,
+    PgTarget,
+    SshTarget,
+    pg_file,
+    pg_queries,
+    ssh_command,
+    ssh_retrieve_file,
+)
 
 CMD_DISABLE_SWAP = "sudo swapoff -a"
 CMD_SYNC = "sudo sync"
@@ -112,3 +128,134 @@ def pg_analyze_waits(
     Analyzes the waits for the PostgreSQL database.
     """
     return pg_file(target, Path(__file__).parent / "pg_analyze_waits.sql", log)
+
+
+class PgStatLogger:
+    def __init__(self, ssh_target: SshTarget, pg_target: PgTarget):
+        self.id = str(uuid.uuid4())
+        self.pg_target = pg_target
+        self.ssh_target = ssh_target
+        self.ssh = paramiko.SSHClient()
+        self.ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+        self.remote_trace_pid = None
+
+    def prepare(self):
+        print("Connecting to the target")
+        self.ssh.connect(
+            self.ssh_target.hostname,
+            port=self.ssh_target.port,
+            username=self.ssh_target.username,
+            password=self.ssh_target.password,
+        )
+        print("Connected to the target")
+
+    def start(self):
+        print("Starting the logger")
+        cmd = (
+            'echo "select now(), sum(total_exec_time) exec_time, sum(calls) calls from pg_stat_statements; \\watch 0.5"'
+            + f"| sudo -u {self.pg_target.username} psql -t"
+            + f"> /tmp/probe-{self.id}.out 2>&1 & echo $!"
+        )
+        _, stdout, _ = self.ssh.exec_command(cmd)
+        pid = int(stdout.read().decode().strip())
+        print(f"Logger script started with PID: {pid}")
+        self.remote_trace_pid = pid
+
+    def stop(self, log: LogConfig):
+        if self.remote_trace_pid is None:
+            print("No log script is running")
+            return
+        self.ssh.exec_command(f"sudo kill -INT {self.remote_trace_pid}")
+
+        output_folder = Path(log.log_file_folder()) / "after" / "stat-queries"
+        output_folder.mkdir(parents=True, exist_ok=True)
+        raw_log_remote_path = f"/tmp/probe-{self.id}.out"
+        raw_log_local_path = str(output_folder / "throughput.log")
+        ssh_retrieve_file(self.ssh_target, raw_log_remote_path, raw_log_local_path)
+
+        timestamps, exec_times, calls = self._parse_probe_log(raw_log_local_path)
+        print(f"Parsed {len(timestamps)} samples from {raw_log_local_path}")
+
+        tp_times, tp_values, lat_values = self._compute_metrics(
+            timestamps, exec_times, calls
+        )
+        self._plot(
+            tp_times, tp_values, lat_values, str(output_folder / "throughput.png")
+        )
+
+    def _parse_probe_log(self, filepath: str):
+        """Parse probe log lines into lists of (timestamp, exec_time, calls)."""
+        timestamps = []
+        exec_times = []
+        calls = []
+
+        with open(filepath) as f:
+            for line in f:
+                line = line.strip()
+                if not line or line.startswith("--") or line.startswith("Watch"):
+                    continue
+
+                parts = [p.strip() for p in line.split("|")]
+                if len(parts) != 3:
+                    continue
+
+                try:
+                    # Timestamp may have timezone offset — strip it for simplicity
+                    ts_raw = re.sub(r"[+-]\d{2}$", "", parts[0].strip())
+                    ts = datetime.strptime(ts_raw, "%Y-%m-%d %H:%M:%S.%f")
+                    et = float(parts[1])
+                    c = int(parts[2])
+                except (ValueError, IndexError):
+                    continue
+
+                timestamps.append(ts)
+                exec_times.append(et)
+                calls.append(c)
+
+        return timestamps, exec_times, calls
+
+    def _compute_metrics(self, timestamps, exec_times, calls):
+        """Compute per-interval throughput (calls/sec) and avg latency (ms/call)."""
+        times = []
+        tp_values = []
+        lat_values = []
+
+        for i in range(1, len(timestamps)):
+            dt = (timestamps[i] - timestamps[i - 1]).total_seconds()
+            if dt <= 0:
+                continue
+            dcalls = calls[i] - calls[i - 1]
+            dexec = exec_times[i] - exec_times[i - 1]
+            if dcalls <= 0:
+                continue
+
+            times.append(timestamps[i])
+            tp_values.append(dcalls / dt)
+            lat_values.append(dexec / dcalls)  # ms per call (exec_time is in ms)
+
+        return times, tp_values, lat_values
+
+    def _plot(self, times, tp_values, lat_values, output_path="throughput.png"):
+        fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(12, 8), sharex=True)
+
+        # --- Throughput subplot ---
+        ax1.plot(times, tp_values, linewidth=0.8, color="#3366cc")
+        ax1.fill_between(times, tp_values, alpha=0.15, color="#3366cc")
+        ax1.set_title("Query Throughput Over Time", fontsize=14)
+        ax1.set_ylabel("Throughput (calls/sec)")
+        ax1.grid(True, alpha=0.3)
+
+        # --- Avg latency subplot ---
+        ax2.plot(times, lat_values, linewidth=0.8, color="#cc3333")
+        ax2.fill_between(times, lat_values, alpha=0.15, color="#cc3333")
+        ax2.set_title("Average Query Latency Over Time", fontsize=14)
+        ax2.set_xlabel("Time")
+        ax2.set_ylabel("Avg Latency (ms/call)")
+        ax2.xaxis.set_major_formatter(mdates.DateFormatter("%H:%M:%S"))
+        ax2.grid(True, alpha=0.3)
+
+        fig.autofmt_xdate()
+        plt.tight_layout()
+        plt.savefig(output_path, dpi=150)
+        print(f"Saved plot to {output_path}")
+        plt.close()

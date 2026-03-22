@@ -146,6 +146,14 @@ class SuiteRunner(ABC):
             log=self.suite.log_config("before/vmstat"),
         )
 
+        print("Before: Init PgStatLogger")
+        self.pg_stat_logger = actions.PgStatLogger(
+            self.suite.ssh_target, self.suite.pg_admin_target
+        )
+        self.pg_stat_logger.prepare()
+        print("Before: Start PgStatLogger")
+        self.pg_stat_logger.start()
+
         for bc in self.bpftrace_clients:
             print(f"Before: Preparing bpftrace client '{bc.config.name}'")
             bc.prepare(log=self.suite.log_config(f"before/bpftrace-{bc.config.name}"))
@@ -153,6 +161,9 @@ class SuiteRunner(ABC):
             bc.start()
 
     def _run_after(self) -> None:
+        if self.pg_stat_logger is not None:
+            self.pg_stat_logger.stop(self.suite.log_config("after/pg_stat_logger"))
+
         if self.suite.pg_admin_target.log_folder is not None:
             print("After: Collecting PostgreSQL logs")
             log_folder = self.suite.pg_admin_target.log_folder

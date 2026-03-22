@@ -1,7 +1,8 @@
-from .util import read_config_file
-from .target_run import PgTarget, LogConfig, shell_command
-from typing import Optional
 import subprocess
+from typing import Optional
+
+from .target_run import LogConfig, PgTarget, shell_command
+from .util import read_config_file
 
 
 class HammerDBConfig(object):
@@ -69,7 +70,7 @@ class ScriptBuilder(object):
             "vuset logtotemp 1",
             "vuset unique 1",
             "vuset showoutput 1",
-            "tcset refreshrate 10",
+            "tcset refreshrate 1",
             "tcset logtotemp 1",
             "tcset timestamps 1",
             'puts "Creating virtual users..."',

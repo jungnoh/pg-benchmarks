@@ -185,9 +185,14 @@ class SuiteRunner(ABC):
             self.suite.pg_admin_target, log=self.suite.log_config("after/stats")
         )
 
+        print("After: List wait events")
+        actions.pg_wait_events(
+            self.suite.pg_admin_target, log=self.suite.log_config("after/wait-types")
+        )
+
         print("After: Analyze waits")
         actions.pg_analyze_waits(
-            self.suite.pg_admin_target, log=self.suite.log_config("after/waits")
+            self.suite.pg_admin_target, log=self.suite.log_config("after/wait-queries")
         )
 
         for bc in self.bpftrace_clients:

@@ -130,6 +130,15 @@ def pg_analyze_waits(
     return pg_file(target, Path(__file__).parent / "pg_analyze_waits.sql", log)
 
 
+def pg_wait_events(
+    target: PgTarget, log: Optional[LogConfig] = None
+) -> subprocess.CompletedProcess:
+    """
+    Lists wait events for the PostgreSQL database.
+    """
+    return pg_file(target, Path(__file__).parent / "pg_wait_events.sql", log)
+
+
 class PgStatLogger:
     def __init__(self, ssh_target: SshTarget, pg_target: PgTarget):
         self.id = str(uuid.uuid4())

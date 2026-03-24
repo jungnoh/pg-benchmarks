@@ -1,6 +1,7 @@
 import math
 import time
 from abc import ABC, abstractmethod
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 from typing import Dict, List, Optional
 
@@ -94,6 +95,16 @@ class SuiteRunner(ABC):
             )
         if config_to_bool(self.config, "BPFTRACE_PG_WAL_ACCESS", False):
             bpftrace_config = BpftraceConfig.pg_wal_access(self.config)
+            self.bpftrace_clients.append(
+                BpftraceClient(self.suite.ssh_target, bpftrace_config)
+            )
+        if config_to_bool(self.config, "BPFTRACE_WAL_PAGE_WORKING_SET", False):
+            bpftrace_config = BpftraceConfig.wal_page_working_set(self.config)
+            self.bpftrace_clients.append(
+                BpftraceClient(self.suite.ssh_target, bpftrace_config)
+            )
+        if config_to_bool(self.config, "BPFTRACE_WAL_CACHE_PAGES", False):
+            bpftrace_config = BpftraceConfig.wal_cache_pages(self.config)
             self.bpftrace_clients.append(
                 BpftraceClient(self.suite.ssh_target, bpftrace_config)
             )
@@ -195,13 +206,26 @@ class SuiteRunner(ABC):
             self.suite.pg_admin_target, log=self.suite.log_config("after/wait-queries")
         )
 
-        for bc in self.bpftrace_clients:
+        def _stop_and_cleanup(bc: BpftraceClient) -> None:
             print(f"After: Stopping bpftrace script '{bc.config.name}'")
-            bc.stop(
-                self.suite.log_config(f"bpftrace-{bc.config.name}"),
-            )
+            bc.stop(self.suite.log_config(f"bpftrace-{bc.config.name}"))
             print(f"After: Cleaning up bpftrace client '{bc.config.name}'")
             bc.cleanup()
+
+        with ThreadPoolExecutor(
+            max_workers=min(4, len(self.bpftrace_clients)) or 1
+        ) as executor:
+            futures = {
+                executor.submit(_stop_and_cleanup, bc): bc
+                for bc in self.bpftrace_clients
+            }
+            for future in as_completed(futures):
+                bc = futures[future]
+                exc = future.exception()
+                if exc:
+                    print(
+                        f"After: Error stopping bpftrace client '{bc.config.name}': {exc}"
+                    )
 
         print("After: Diff vmstat")
         vmstat.diff(

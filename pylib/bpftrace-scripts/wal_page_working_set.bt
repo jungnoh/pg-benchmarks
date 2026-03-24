@@ -1,0 +1,73 @@
+// wal_page_working_set.bt
+//
+// Tracks distinct WAL file pages loaded into the OS page cache (cache misses).
+// Each unique (inode, page_index) pair is emitted at most once per 500 ms
+// interval to bound log volume while preserving per-interval resolution.
+//
+// Output format:
+//   A <ms_from_start> <inode> <page_index>
+//
+// One "A" line per distinct WAL page first seen in a 500 ms interval.
+// The parser (wal_page_working_set_parse.py) computes rolling-window
+// distinct page counts for configurable window widths.
+//
+// NOTE: relies on the page cache being empty for WAL files at trace start
+// (suite.py calls CMD_DROP_CACHES before bpftrace starts).
+//
+// Map sizing rationale:
+//   @wal_inodes       — one entry per open WAL segment; max_wal_size/wal_segment_size
+//                       = 1GB/16MB = 64 segments active at peak; 256 is a safe margin.
+//   @seen_this_interval — cleared every 500ms; peak fill is the number of distinct WAL
+//                       pages loaded in one interval.  At 70 MB/s WAL write rate that
+//                       is ~35 MB / 4 KB = ~8,875 pages; 20,000 gives 2× headroom.
+// Both maps share this limit (the larger value governs).
+// With max_map_keys=20000:
+//   bucket array per map = roundup_pow_of_two(20000)*16 = 32768*16 = 512 KB
+//   vs 256 MB per map under BPFTRACE_MAX_MAP_KEYS=9999999.
+config = {
+    max_map_keys = 20000;
+}
+
+BEGIN {
+    @_start_time = nsecs;
+    printf("Start: %lld\n", nsecs(tai));
+    @_interval_start_ms = 0;
+}
+
+// Register inode numbers of WAL files as postgres opens them.
+// WAL segment filenames: 24 hex chars, first 7 are always '0' for
+// timelines < 0x10000000.
+kprobe:vfs_open /comm == "postgres"/ {
+    $path = (struct path *)arg0;
+    $dent = $path->dentry;
+    $fname = str($dent->d_name.name);
+    if (strncmp($fname, "0000000", 7) == 0) {
+        @wal_inodes[$dent->d_inode->i_ino] = 1;
+    }
+}
+
+// A WAL page was loaded from disk into the page cache.
+// Deduplicate: only emit one event per (inode, page_index) per interval.
+tracepoint:filemap:mm_filemap_add_to_page_cache {
+    if (@wal_inodes[args->i_ino]) {
+        if (@seen_this_interval[args->i_ino, args->index] == 0) {
+            @seen_this_interval[args->i_ino, args->index] = 1;
+            printf("A %10lld %lu %lu\n",
+                @_interval_start_ms,
+                args->i_ino,
+                (uint64)args->index);
+        }
+    }
+}
+
+interval:ms:500 {
+    @_interval_start_ms = (nsecs - @_start_time) / 1000000;
+    clear(@seen_this_interval);
+}
+
+END {
+    clear(@wal_inodes);
+    clear(@seen_this_interval);
+    clear(@_start_time);
+    clear(@_interval_start_ms);
+}

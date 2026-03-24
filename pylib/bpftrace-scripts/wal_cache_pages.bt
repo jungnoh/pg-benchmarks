@@ -1,0 +1,73 @@
+// wal_cache_pages.bt
+//
+// Tracks the number of WAL file pages resident in the OS page cache over time.
+// WAL files are identified by name (PostgreSQL WAL segments start with "0000000").
+//
+// Output format (one line per 500 ms interval):
+//   W <ms_from_start> <wal_active_pages> <interval_adds> <interval_evicts>
+//
+// wal_active_pages  - running count of WAL pages currently in the page cache
+// interval_adds     - WAL pages loaded into page cache this interval
+// interval_evicts   - WAL pages evicted from page cache this interval
+
+// Map sizing: @wal_inodes needs at most one entry per open WAL segment.
+// PostgreSQL keeps at most max_wal_size/wal_segment_size = 1GB/16MB = 64
+// segments active; use 256 for a comfortable margin.
+// This overrides BPFTRACE_MAX_MAP_KEYS so the bucket array stays at
+// roundup_pow_of_two(256)*16 = 4 KB instead of 256 MB.
+config = {
+    max_map_keys = 256;
+}
+
+BEGIN {
+    @_start_time = nsecs;
+    printf("Start: %lld\n", nsecs(tai));
+    @wal_active = 0;
+    @_interval_adds = 0;
+    @_interval_evicts = 0;
+}
+
+// Register inode numbers of WAL files as postgres opens them.
+// WAL segment filenames follow the pattern 0000000[1-F]XXXXXXXXXXXXXXXX
+// (24 hex chars, first 7 are always zero for timelines < 0x10000000).
+kprobe:vfs_open /comm == "postgres"/ {
+    $path = (struct path *)arg0;
+    $dent = $path->dentry;
+    $fname = str($dent->d_name.name);
+    if (strncmp($fname, "0000000", 7) == 0) {
+        @wal_inodes[$dent->d_inode->i_ino] = 1;
+    }
+}
+
+// A WAL page was loaded into the page cache (cache miss / read-ahead).
+tracepoint:filemap:mm_filemap_add_to_page_cache {
+    if (@wal_inodes[args->i_ino]) {
+        @wal_active++;
+        @_interval_adds++;
+    }
+}
+
+// A WAL page was evicted from the page cache.
+tracepoint:filemap:mm_filemap_delete_from_page_cache {
+    if (@wal_inodes[args->i_ino]) {
+        @wal_active--;
+        @_interval_evicts++;
+    }
+}
+
+interval:ms:500 {
+    printf("W %10lld %lld %lld %lld\n",
+        (nsecs - @_start_time) / 1000000,
+        @wal_active,
+        @_interval_adds,
+        @_interval_evicts);
+    @_interval_adds = 0;
+    @_interval_evicts = 0;
+}
+
+END {
+    clear(@wal_inodes);
+    clear(@_start_time);
+    clear(@_interval_adds);
+    clear(@_interval_evicts);
+}

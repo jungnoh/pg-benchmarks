@@ -75,6 +75,34 @@ class BpftraceConfig:
         )
         return cfg._apply_config(config)
 
+    def wal_page_working_set(config: Dict[str, str]) -> "BpftraceConfig":
+        script_path = SCRIPT_DIR / "wal_page_working_set.bt"
+        parsers = [
+            BpftraceParseScript(
+                script_path=str(SCRIPT_DIR / "wal_page_working_set_parse.py"),
+                output_path="/tmp/wal_page_working_set.png",
+                result_extension="png",
+            )
+        ]
+        cfg = BpftraceConfig(
+            name="wal_page_working_set", script_path=str(script_path), parsers=parsers
+        )
+        return cfg._apply_config(config)
+
+    def wal_cache_pages(config: Dict[str, str]) -> "BpftraceConfig":
+        script_path = SCRIPT_DIR / "wal_cache_pages.bt"
+        parsers = [
+            BpftraceParseScript(
+                script_path=str(SCRIPT_DIR / "wal_cache_pages_graph.py"),
+                output_path="/tmp/wal_cache_pages.png",
+                result_extension="png",
+            )
+        ]
+        cfg = BpftraceConfig(
+            name="wal_cache_pages", script_path=str(script_path), parsers=parsers
+        )
+        return cfg._apply_config(config)
+
     def cache_misses_by_ino(config: Dict[str, str]) -> "BpftraceConfig":
         script_path = SCRIPT_DIR / "cache_misses_by_ino.bt"
         parsers = [

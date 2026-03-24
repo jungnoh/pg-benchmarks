@@ -18,21 +18,10 @@ char _license[] SEC("license") = "GPL";
 
 __u64 general_lru_list;
 __u64 wal_lru_list;
-unsigned long wal_inode_lru[2];
+unsigned long wal_last_accessed_ino = 0;
 
-inline void wal_lru_inode_accessed(unsigned long ino) {
-    if (wal_inode_lru[0] == ino) {
-        return;
-    }
-    wal_inode_lru[1] = wal_inode_lru[0];
-    wal_inode_lru[0] = ino;
-}
 
-inline bool inode_in_wal_lru(unsigned long ino) {
-    return ino == wal_inode_lru[0] || ino == wal_inode_lru[1];
-}
-
-inline struct watchlist_state* lookup_folio(struct folio *folio)
+static inline struct watchlist_state* lookup_folio(struct folio *folio)
 {
 	if (!folio) {
 		return NULL;
@@ -75,9 +64,9 @@ void BPF_STRUCT_OPS(wal_lru_folio_added, struct folio *folio)
 
     int ret;
     unsigned long ino = folio->mapping->host->i_ino;
-    if (ino_is_wal_file(ino)) {
+    if (state->is_wal_file) {
         ret = bpf_cache_ext_list_add_tail(wal_lru_list, folio);
-        wal_lru_inode_accessed(ino);
+        wal_last_accessed_ino = ino;
     } else {
         ret = bpf_cache_ext_list_add_tail(general_lru_list, folio);
     }
@@ -101,10 +90,10 @@ void BPF_STRUCT_OPS(wal_lru_folio_accessed, struct folio *folio)
 
     int ret;
     unsigned long ino = folio->mapping->host->i_ino;
-    if (ino_is_wal_file(ino)) {
-        bpf_printk("cache_ext: WAL LRU folio accessed - ino %lu\n", folio->mapping->host->i_ino);
+    if (state->is_wal_file) {
+        bpf_printk("cache_ext: WAL LRU folio accessed - ino %lu\n", ino);
         ret = bpf_cache_ext_list_move(wal_lru_list, folio, true);
-        wal_lru_inode_accessed(ino);
+        wal_last_accessed_ino = ino;
     } else {
         ret = bpf_cache_ext_list_move(general_lru_list, folio, true);
     }
@@ -120,6 +109,10 @@ void BPF_STRUCT_OPS(wal_lru_folio_accessed, struct folio *folio)
 void BPF_STRUCT_OPS(wal_lru_folio_evicted, struct folio *folio)
 {
 	dbg_printk("cache_ext: Hi from the wal_lru_folio_evicted hook! :D\n");
+	struct watchlist_state* state = lookup_folio(folio);
+	if (state == NULL) {
+		return;
+	}
 	bpf_cache_ext_list_del(folio);
 }
 
@@ -134,15 +127,18 @@ static int iterate_wal_lru_list(int idx, struct cache_ext_list_node *node)
 		return CACHE_EXT_CONTINUE_ITER;
 	}
 	unsigned long ino = node->folio->mapping->host->i_ino;
-	if (inode_in_wal_lru(ino)) {
+	if (ino == wal_last_accessed_ino) {
 	    return CACHE_EXT_CONTINUE_ITER;
 	}
-	bpf_printk("cache_ext: Evicting WAL folio for ino %lu\n", ino);
+	// bpf_printk("cache_ext: Evicting WAL folio for ino %lu\n", ino);
 	return CACHE_EXT_EVICT_NODE;
 }
 
 static int iterate_general_lru_list(int idx, struct cache_ext_list_node *node)
 {
+	if (node->folio == NULL) {
+		return CACHE_EXT_CONTINUE_ITER;
+	}
 	if (!folio_test_uptodate(node->folio) || !folio_test_lru(node->folio)) {
 		return CACHE_EXT_CONTINUE_ITER;
 	}

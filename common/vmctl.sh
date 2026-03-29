@@ -10,6 +10,9 @@ VM_SHARED_PATH=/home/jungnoh/pg-benchmarks/vm-shared
 PSQL_VM_PORT=5432
 PSQL_HOST_PORT=35432
 
+EXPORTER_VM_PORT=9187
+EXPORTER_HOST_PORT=39187
+
 NVME_PCIE_ADDR="0000:3b:00.0" # Set proper PCIE address for your NVMe device.
 
 case "$1" in
@@ -32,7 +35,7 @@ case "$1" in
             -append "root=/dev/sda rw console=ttyS0 selinux=0" \
             --enable-kvm \
             --nographic \
-            -netdev user,id=net0,restrict=off,hostfwd=tcp::$QEMU_SSH_PORT-:22,hostfwd=tcp::$PSQL_HOST_PORT-:$PSQL_VM_PORT \
+            -netdev user,id=net0,restrict=off,hostfwd=tcp::$QEMU_SSH_PORT-:22,hostfwd=tcp::$PSQL_HOST_PORT-:$PSQL_VM_PORT,hostfwd=tcp::$EXPORTER_HOST_PORT-:$EXPORTER_VM_PORT \
             -device virtio-net-pci,netdev=net0 \
             -mem-prealloc \
             -gdb tcp::$QEMU_GDB_PORT  \

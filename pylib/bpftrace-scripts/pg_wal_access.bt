@@ -40,7 +40,7 @@ kprobe:vfs_read /uid == $1/
     if (strncmp($fname, "0000000", 7) != 0) {
         return;
     }
-    
+
     @_wal_reads++;
     @_wal_read_bytes += (uint64)arg2;
 
@@ -48,7 +48,7 @@ kprobe:vfs_read /uid == $1/
     $pos = *(int64 *)arg3;
     printf("R/%lld/%s/%lld/%lld\n", nsecs - @_start_time, $fname, $pos, $size);
 }
-    
+
 kprobe:vfs_write /uid == $1/
 {
     $file = (struct file *)arg0;
@@ -79,4 +79,3 @@ kprobe:vfs_write /uid == $1/
     $size = (uint64)arg2;
     printf("W/%lld/%s/%lld/%lld\n", nsecs - @_start_time, $fname, $pos, $size);
 }
-    

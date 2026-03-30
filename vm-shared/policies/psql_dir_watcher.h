@@ -51,21 +51,24 @@ int initialize_watch_dir_map(const char *path, int watch_dir_map_fd, int wal_wat
 			return -1;
 		}
 		if (S_ISDIR(sb.st_mode)) {
-			if (!recursive) {
-				free(filepath);
-				continue;
+			if (recursive) {
+				ret = initialize_watch_dir_map(filepath, watch_dir_map_fd, wal_watchlist_map_fd, recursive);
+				if (ret < 0) {
+					closedir(dir);
+					free(filepath);
+					return ret;
+				}
 			}
-
-			// Recurse for nested directories
-			ret = initialize_watch_dir_map(filepath, watch_dir_map_fd, wal_watchlist_map_fd, recursive);
-			if (ret < 0) {
-				closedir(dir);
-				free(filepath);
-				return ret;
-			}
+			// Do not add directory inodes to the watchlist.
+			free(filepath);
+			continue;
 		}
 
-		bool is_wal_file = is_wal_filename(filepath, (int)strlen(filepath));
+		// Use only the filename component for WAL detection so that
+		// is_wal_filename's BPF_PATH_MAX length guard does not
+		// produce false negatives on installations whose full pg_wal
+		// path exceeds 128 bytes.
+		bool is_wal_file = is_wal_filename(ent->d_name, (int)strlen(ent->d_name));
 		fprintf(stderr, "Adding inode %lu to watch_dir map\nFilename: %s, is WAL: %d\n",
 		        ent->d_ino, filepath, is_wal_file);
 		free(filepath);

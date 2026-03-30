@@ -58,15 +58,33 @@ s32 BPF_STRUCT_OPS_SLEEPABLE(wal_lru_init, struct mem_cgroup *memcg)
 void BPF_STRUCT_OPS(wal_lru_folio_added, struct folio *folio)
 {
     struct watchlist_state* state = lookup_folio(folio);
+
+    // If state is NULL the folio is either anonymous (mapping==NULL) or
+    // belongs to a file whose inode was not in inode_watchlist at open time
+    // (e.g. WAL segments pre-opened by Postgres before the BPF probe was
+    // attached).  Anonymous pages are skipped; file-backed pages are added
+    // to the general list so they remain reclaimable by the policy.
     if (state == NULL) {
-		return;
+        if (!folio || folio->mapping == NULL || folio->mapping->host == NULL)
+            return;  // anonymous or no inode — skip
+        unsigned long ino = folio->mapping->host->i_ino;
+        if (ino_is_wal_file(ino)) {
+            // Untracked WAL inode (opened before probe attached): evict like tracked WAL.
+            if (bpf_cache_ext_list_add_tail(wal_lru_list, folio) != 0)
+                bpf_printk("cache_ext: Failed to add untracked WAL folio to wal_lru_list\n");
+            WRITE_ONCE(wal_last_accessed_ino, ino);
+        } else {
+            if (bpf_cache_ext_list_add_tail(general_lru_list, folio) != 0)
+                bpf_printk("cache_ext: Failed to add untracked folio to general_lru_list\n");
+        }
+        return;
 	}
 
     int ret;
     unsigned long ino = folio->mapping->host->i_ino;
     if (state->is_wal_file) {
         ret = bpf_cache_ext_list_add_tail(wal_lru_list, folio);
-        wal_last_accessed_ino = ino;
+        WRITE_ONCE(wal_last_accessed_ino, ino);
     } else {
         ret = bpf_cache_ext_list_add_tail(general_lru_list, folio);
     }
@@ -82,18 +100,38 @@ void BPF_STRUCT_OPS(wal_lru_folio_accessed, struct folio *folio)
 {
 	dbg_printk("cache_ext: Hi from the wal_lru_folio_accessed hook! :D\n");
 
-
 	struct watchlist_state* state = lookup_folio(folio);
+
+    int ret;
     if (state == NULL) {
+        if (!folio || folio->mapping == NULL || folio->mapping->host == NULL)
+            return;
+        unsigned long ino = folio->mapping->host->i_ino;
+        if (ino_is_wal_file(ino)) {
+            ret = bpf_cache_ext_list_move(wal_lru_list, folio, true);
+            WRITE_ONCE(wal_last_accessed_ino, ino);
+            if (ret != 0)
+                bpf_printk("cache_ext: Failed to move untracked WAL folio in wal_lru_list\n");
+        } else {
+            ret = bpf_cache_ext_list_move(general_lru_list, folio, true);
+            if (ret != 0)
+                bpf_printk("cache_ext: Failed to move untracked folio in general_lru_list\n");
+        }
         return;
     }
 
-    int ret;
     unsigned long ino = folio->mapping->host->i_ino;
     if (state->is_wal_file) {
-        bpf_printk("cache_ext: WAL LRU folio accessed - ino %lu\n", ino);
+        dbg_printk("cache_ext: WAL LRU folio accessed - ino %lu\n", ino);
         ret = bpf_cache_ext_list_move(wal_lru_list, folio, true);
-        wal_last_accessed_ino = ino;
+        if (ret != 0) {
+            // Folio was likely added to general_lru_list before this inode
+            // was registered as WAL (late registration after probe attach).
+            // Migrate it to wal_lru_list.
+            bpf_cache_ext_list_del(folio);
+            ret = bpf_cache_ext_list_add_tail(wal_lru_list, folio);
+        }
+        WRITE_ONCE(wal_last_accessed_ino, ino);
     } else {
         ret = bpf_cache_ext_list_move(general_lru_list, folio, true);
     }
@@ -109,10 +147,11 @@ void BPF_STRUCT_OPS(wal_lru_folio_accessed, struct folio *folio)
 void BPF_STRUCT_OPS(wal_lru_folio_evicted, struct folio *folio)
 {
 	dbg_printk("cache_ext: Hi from the wal_lru_folio_evicted hook! :D\n");
-	struct watchlist_state* state = lookup_folio(folio);
-	if (state == NULL) {
+	// Remove from whichever list the folio is on.  list_del does not need
+	// mapping/host — only the folio pointer.  Skipping the call when mapping
+	// is NULL (e.g. after truncation) would leak the node in the list.
+	if (!folio)
 		return;
-	}
 	bpf_cache_ext_list_del(folio);
 }
 
@@ -127,7 +166,7 @@ static int iterate_wal_lru_list(int idx, struct cache_ext_list_node *node)
 		return CACHE_EXT_CONTINUE_ITER;
 	}
 	unsigned long ino = node->folio->mapping->host->i_ino;
-	if (ino == wal_last_accessed_ino) {
+	if (ino == READ_ONCE(wal_last_accessed_ino)) {
 	    return CACHE_EXT_CONTINUE_ITER;
 	}
 	// bpf_printk("cache_ext: Evicting WAL folio for ino %lu\n", ino);
@@ -149,18 +188,30 @@ void BPF_STRUCT_OPS(wal_lru_evict_folios, struct cache_ext_eviction_ctx *evictio
 	       struct mem_cgroup *memcg)
 {
 	dbg_printk("cache_ext: Hi from the wal_lru_evict_folios hook! :D\n");
-	int ret = bpf_cache_ext_list_iterate(memcg, wal_lru_list, iterate_wal_lru_list,
-					     eviction_ctx);
-	if (ret < 0) {
-		bpf_printk("cache_ext: Failed to evict folios\n");
-	}
-	if (eviction_ctx->request_nr_folios_to_evict <= eviction_ctx->nr_folios_to_evict) {
-		return;
+
+	// Drain ALL stale WAL segments (pages from any ino != wal_last_accessed_ino)
+	// regardless of how many the kernel requested.  This keeps the WAL list
+	// from accumulating across calls; the general list handles the actual
+	// kernel-requested quota below.
+	// Skip the WAL drain when wal_last_accessed_ino is still 0 (no WAL access
+	// recorded yet) — otherwise every WAL page would be evicted since no real
+	// inode has i_ino == 0.
+	unsigned long orig_request = eviction_ctx->request_nr_folios_to_evict;
+	if (READ_ONCE(wal_last_accessed_ino) != 0) {
+		eviction_ctx->request_nr_folios_to_evict = (unsigned long)-1 >> 1;
+		int wal_ret = bpf_cache_ext_list_iterate(memcg, wal_lru_list, iterate_wal_lru_list,
+						     eviction_ctx);
+		eviction_ctx->request_nr_folios_to_evict = orig_request;
+		if (wal_ret < 0) {
+			bpf_printk("cache_ext: Failed to evict WAL folios\n");
+		}
+		if (eviction_ctx->nr_folios_to_evict >= orig_request) {
+			return;
+		}
 	}
 
-	ret = bpf_cache_ext_list_iterate(memcg, general_lru_list, iterate_general_lru_list,
+	int ret = bpf_cache_ext_list_iterate(memcg, general_lru_list, iterate_general_lru_list,
 					     eviction_ctx);
-	// Check that the right amount of folios were evicted
 	if (ret < 0) {
 		bpf_printk("cache_ext: Failed to evict folios\n");
 	}

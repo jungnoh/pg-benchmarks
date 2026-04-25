@@ -1,5 +1,7 @@
 #!/bin/bash
 
+SCREEN_SESS_NAME=pg-benchmark-vm
+
 QEMU_SSH_PORT=5555
 QEMU_GDB_PORT=1235
 
@@ -10,8 +12,11 @@ VM_SHARED_PATH=/home/jungnoh/pg-benchmarks/vm-shared
 PSQL_VM_PORT=5432
 PSQL_HOST_PORT=35432
 
-EXPORTER_VM_PORT=9187
-EXPORTER_HOST_PORT=39187
+PSQL_EXPORTER_VM_PORT=9187
+PSQL_EXPORTER_HOST_PORT=39187
+
+NODE_EXPORTER_VM_PORT=9100
+NODE_EXPORTER_HOST_PORT=39100
 
 NVME_PCIE_ADDR="0000:3b:00.0" # Set proper PCIE address for your NVMe device.
 
@@ -27,7 +32,7 @@ case "$1" in
         TOTAL_MEM="${3}G"
 
         # numactl --cpunodebind=0 --membind=0 \
-        qemu-system-x86_64 -kernel "$BOOT_IMG_PATH" \
+        screen -dmS "$SCREEN_SESS_NAME" qemu-system-x86_64 -kernel "$BOOT_IMG_PATH" \
             -cpu host \
             -smp cpus="$CPU_COUNT" \
             -drive file="$KERNEL_IMG_PATH",index=0,media=disk,format=qcow2 \
@@ -35,7 +40,7 @@ case "$1" in
             -append "root=/dev/sda rw console=ttyS0 selinux=0" \
             --enable-kvm \
             --nographic \
-            -netdev user,id=net0,restrict=off,hostfwd=tcp::$QEMU_SSH_PORT-:22,hostfwd=tcp::$PSQL_HOST_PORT-:$PSQL_VM_PORT,hostfwd=tcp::$EXPORTER_HOST_PORT-:$EXPORTER_VM_PORT \
+            -netdev user,id=net0,restrict=off,hostfwd=tcp::$QEMU_SSH_PORT-:22,hostfwd=tcp::$PSQL_HOST_PORT-:$PSQL_VM_PORT,hostfwd=tcp::$PSQL_EXPORTER_HOST_PORT-:$PSQL_EXPORTER_VM_PORT,hostfwd=tcp::$NODE_EXPORTER_HOST_PORT-:$NODE_EXPORTER_VM_PORT \
             -device virtio-net-pci,netdev=net0 \
             -mem-prealloc \
             -gdb tcp::$QEMU_GDB_PORT  \
@@ -44,7 +49,8 @@ case "$1" in
             # Mount with: sudo mkdir -p /mnt/hostshare && sudo mount -t 9p -o trans=virtio hostshare /mnt/hostshare
         ;;
     stop)
-        sudo pkill -9 qemu-system-x86
+        # sudo pkill -9 qemu-system-x86
+	screen -X -S "$SCREEN_SESS_NAME" quit
         ;;
     *)
         echo "Usage: $0 {start|stop}"

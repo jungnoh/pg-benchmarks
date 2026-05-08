@@ -67,13 +67,14 @@ def _build_sysbench_args(target: PgTarget) -> List[str]:
 
 
 if __name__ == "__main__":
-    if len(sys.argv) < 2:
-        sys.exit(f"Usage: {sys.argv[0]} <prepare|run|cleanup>")
+    overrides, argv = suite.parse_cli_overrides(sys.argv)
+    if len(argv) < 2:
+        sys.exit(f"Usage: {argv[0]} <prepare|run|cleanup>")
 
     s = SysbenchSuite("oltp_read_write", "sysbench.conf")
-    runner = suite.SuiteRunner("target.conf", s)
+    runner = suite.SuiteRunner("target.conf", s, config_overrides=overrides)
 
-    command = sys.argv[1]
+    command = argv[1]
     if command == "prepare":
         s.prepare()
     elif command == "run":
@@ -81,4 +82,4 @@ if __name__ == "__main__":
     elif command == "cleanup":
         s.cleanup()
     else:
-        sys.exit(f"Usage: {sys.argv[0]} <prepare|run|cleanup>")
+        sys.exit(f"Usage: {argv[0]} <prepare|run|cleanup>")

@@ -3,7 +3,7 @@ import time
 from abc import ABC, abstractmethod
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Tuple
 
 from . import target_actions as actions
 from . import target_run as run
@@ -21,6 +21,43 @@ def config_to_bool(config: Dict[str, str], key: str, default: bool = False) -> b
         return False
     else:
         raise ValueError(f"Invalid boolean value: {value}")
+
+
+def parse_cli_overrides(argv: List[str]) -> Tuple[Dict[str, str], List[str]]:
+    """
+    Strip recognized config-override flags from argv and return
+    (overrides, remaining_argv). Recognized flags:
+
+      --cache-ext-policy             -> CACHE_EXT_POLICY=true
+      --no-cache-ext-policy          -> CACHE_EXT_POLICY=false
+      --cache-ext-policy-binary NAME -> CACHE_EXT_POLICY_BINARY=NAME
+      --cache-ext-policy-binary=NAME -> CACHE_EXT_POLICY_BINARY=NAME
+    """
+    overrides: Dict[str, str] = {}
+    remaining: List[str] = []
+    i = 0
+    while i < len(argv):
+        a = argv[i]
+        if a == "--cache-ext-policy":
+            overrides["CACHE_EXT_POLICY"] = "true"
+            i += 1
+        elif a == "--no-cache-ext-policy":
+            overrides["CACHE_EXT_POLICY"] = "false"
+            i += 1
+        elif a == "--cache-ext-policy-binary":
+            if i + 1 >= len(argv):
+                raise ValueError(
+                    "--cache-ext-policy-binary requires a value"
+                )
+            overrides["CACHE_EXT_POLICY_BINARY"] = argv[i + 1]
+            i += 2
+        elif a.startswith("--cache-ext-policy-binary="):
+            overrides["CACHE_EXT_POLICY_BINARY"] = a.split("=", 1)[1]
+            i += 1
+        else:
+            remaining.append(a)
+            i += 1
+    return overrides, remaining
 
 
 class Suite(ABC):
@@ -49,8 +86,15 @@ class Suite(ABC):
 class SuiteRunner(ABC):
     bpftrace_clients: List[BpftraceClient] = []
 
-    def __init__(self, config_file: str, suite: Suite):
+    def __init__(
+        self,
+        config_file: str,
+        suite: Suite,
+        config_overrides: Optional[Dict[str, str]] = None,
+    ):
         self.config = read_config_file(config_file)
+        if config_overrides:
+            self.config.update(config_overrides)
         self.suite = suite
         self.pg_version = self.config.get("PG_VERSION", 18)
         self.pg_cluster_name = self.config.get("PG_CLUSTER_NAME", "main")

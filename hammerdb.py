@@ -53,20 +53,21 @@ class HammerDBSuite(suite.Suite):
 
 
 if __name__ == "__main__":
-    if len(sys.argv) < 2:
-        sys.exit(f"Usage: {sys.argv[0]} <prepare|run|cleanup>")
+    overrides, argv = suite.parse_cli_overrides(sys.argv)
+    if len(argv) < 2:
+        sys.exit(f"Usage: {argv[0]} <prepare|run|cleanup>")
 
     s = HammerDBSuite("hammerdb.conf")
-    runner = suite.SuiteRunner("target.conf", s)
+    runner = suite.SuiteRunner("target.conf", s, config_overrides=overrides)
 
-    command = sys.argv[1]
+    command = argv[1]
     if command == "prepare":
         s.prepare()
     elif command == "run":
-        if len(sys.argv) >= 3:
-            s.name_prefix = sys.argv[2]
+        if len(argv) >= 3:
+            s.name_prefix = argv[2]
         runner.run()
     elif command == "cleanup":
         s.cleanup()
     else:
-        sys.exit(f"Usage: {sys.argv[0]} <prepare|run|cleanup>")
+        sys.exit(f"Usage: {argv[0]} <prepare|run|cleanup>")

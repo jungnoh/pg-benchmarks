@@ -16,6 +16,7 @@ class HammerDBConfig(object):
     tpcc_all_warehouses: bool
     tpch_parallelism: int
     tpch_scale_factor: int
+    tpch_threads: int
 
     @staticmethod
     def read_config_file(config_file: str):
@@ -30,6 +31,7 @@ class HammerDBConfig(object):
 
         result.tpch_parallelism = int(config.get("TPCH_PARALLELISM") or "4")
         result.tpch_scale_factor = int(config.get("TPCH_SCALE_FACTOR") or "10")
+        result.tpch_threads = int(config.get("TPCH_THREADS") or "16")
         result.tpcc_warehouse = int(config.get("TPCC_WAREHOUSE") or "10")
         result.tpcc_vu = int(config.get("TPCC_VU") or "4")
         result.tpcc_rampup = int(config.get("TPCC_RAMPUP") or "2")
@@ -152,6 +154,7 @@ class ScriptBuilder(object):
                     # Scale
                     f"diset tpch pg_degree_of_parallel {self.config.tpch_parallelism}",
                     f"diset tpch pg_scale_fact {self.config.tpch_scale_factor}",
+                    f"diset tpch pg_num_tpch_threads {self.config.tpch_threads}",
                 ]
             )
 

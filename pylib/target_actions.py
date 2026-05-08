@@ -1,5 +1,6 @@
 import re
 import subprocess
+import time
 import uuid
 from datetime import datetime
 from pathlib import Path
@@ -16,6 +17,7 @@ from .target_run import (
     pg_file,
     pg_queries,
     ssh_command,
+    ssh_retrieve_directory,
     ssh_retrieve_file,
 )
 
@@ -82,6 +84,7 @@ def pg_build_configs(system_mem_size_gb: int) -> Dict[str, str]:
     """
     mem_mb = system_mem_size_gb * 1024
     return {
+        **pg_default_configs(),
         "shared_buffers": f"{(mem_mb * 0.25):.0f}MB",
         "effective_cache_size": f"{(mem_mb * 0.75):.0f}MB",
         "maintenance_work_mem": f"{(mem_mb / 16):.0f}MB",
@@ -99,6 +102,7 @@ def pg_default_configs() -> Dict[str, str]:
     Default values reference: https://postgresqlco.nf/doc/en/param/
     """
     return {
+        "track_io_timing": "on",
         "shared_buffers": "128MB",
         "effective_cache_size": "4GB",
         "maintenance_work_mem": "64MB",
@@ -268,3 +272,66 @@ class PgStatLogger:
         plt.savefig(output_path, dpi=150)
         print(f"Saved plot to {output_path}")
         plt.close()
+
+
+class PageEvictTracker:
+    REMOTE_OUTPUT_DIR = "page-monitor"
+    SHUTDOWN_TIMEOUT_SECS = 300
+
+    def __init__(self, ssh_target: SshTarget, run_id: str):
+        self.id = str(uuid.uuid4())
+        self.ssh_target = ssh_target
+        self.run_id = run_id
+        self.screen_session = f"page-evict-{self.id}"
+        self.ssh = paramiko.SSHClient()
+        self.ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+        self.started = False
+
+    def prepare(self):
+        print("Connecting to the target")
+        self.ssh.connect(
+            self.ssh_target.hostname,
+            port=self.ssh_target.port,
+            username=self.ssh_target.username,
+            password=self.ssh_target.password,
+        )
+        print("Connected to the target")
+
+    def start(self):
+        cmd = (
+            f"bash -lc 'cd ~ && screen -dmS {self.screen_session} "
+            f"sudo ./page-evict-tracker --root /mnt/psql/18/ "
+            f"--log-level debug {self.run_id}'"
+        )
+        print(f"Starting page-evict-tracker: {cmd}")
+        self.ssh.exec_command(cmd)
+        self.started = True
+
+    def stop(self, log: LogConfig):
+        if not self.started:
+            print("No page-evict-tracker is running")
+            return
+
+        pgrep_pattern = f"page-evict-tracker.*{self.run_id}"
+        self.ssh.exec_command(f"sudo pkill -INT -f '{pgrep_pattern}'")
+
+        wait_count = int(self.SHUTDOWN_TIMEOUT_SECS / 0.5)
+        for i in range(wait_count):
+            _, stdout, _ = self.ssh.exec_command(f"pgrep -f '{pgrep_pattern}'")
+            if stdout.read().decode().strip() == "":
+                print("page-evict-tracker stopped")
+                break
+            if i == wait_count - 1:
+                print("page-evict-tracker did not stop within timeout")
+                break
+            time.sleep(0.5)
+
+        # Reap the (now likely empty) screen session either way.
+        self.ssh.exec_command(f"screen -X -S {self.screen_session} quit")
+
+        local_dir = Path(log.log_file_folder()) / "after" / "page_evict_tracker"
+        local_dir.mkdir(parents=True, exist_ok=True)
+        remote_dir = f"~/{self.REMOTE_OUTPUT_DIR}/{self.run_id}"
+        ssh_retrieve_directory(self.ssh_target, remote_dir, str(local_dir))
+
+        self.started = False

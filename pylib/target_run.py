@@ -120,6 +120,19 @@ def ssh_retrieve_file(
     return shell_command(scp_cmd, log)
 
 
+def ssh_retrieve_directory(
+    target: SshTarget, source: str, destination: str, log: Optional[LogConfig] = None
+) -> subprocess.CompletedProcess:
+    """
+    Retrieves a directory tree from a remote server.
+    """
+    if target.password is None:
+        scp_cmd = f"scp -r -P {target.port} {target.username}@{target.hostname}:{source} {destination}"
+    else:
+        scp_cmd = f"sshpass -p {target.password} scp -r -P {target.port} {target.username}@{target.hostname}:{source} {destination}"
+    return shell_command(scp_cmd, log)
+
+
 @dataclass
 class PgTarget:
     username: str

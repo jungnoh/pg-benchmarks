@@ -109,6 +109,13 @@ class SuiteRunner(ABC):
                 BpftraceClient(self.suite.ssh_target, bpftrace_config)
             )
 
+        self.page_evict_tracker: Optional[actions.PageEvictTracker] = None
+        if config_to_bool(self.config, "PAGE_EVICT_TRACKER", False):
+            self.page_evict_tracker = actions.PageEvictTracker(
+                self.suite.ssh_target,
+                run_id=f"{self.suite.start_time:.0f}",
+            )
+
     def run(self) -> None:
         self._run_before()
         self.suite.run()
@@ -165,6 +172,12 @@ class SuiteRunner(ABC):
         print("Before: Start PgStatLogger")
         self.pg_stat_logger.start()
 
+        if self.page_evict_tracker is not None:
+            print("Before: Init PageEvictTracker")
+            self.page_evict_tracker.prepare()
+            print("Before: Start PageEvictTracker")
+            self.page_evict_tracker.start()
+
         for bc in self.bpftrace_clients:
             print(f"Before: Preparing bpftrace client '{bc.config.name}'")
             bc.prepare(log=self.suite.log_config(f"before/bpftrace-{bc.config.name}"))
@@ -174,6 +187,12 @@ class SuiteRunner(ABC):
     def _run_after(self) -> None:
         if self.pg_stat_logger is not None:
             self.pg_stat_logger.stop(self.suite.log_config("after/pg_stat_logger"))
+
+        if self.page_evict_tracker is not None:
+            print("After: Stop PageEvictTracker")
+            self.page_evict_tracker.stop(
+                self.suite.log_config("after/page_evict_tracker")
+            )
 
         if self.suite.pg_admin_target.log_folder is not None:
             print("After: Collecting PostgreSQL logs")

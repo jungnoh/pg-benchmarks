@@ -116,6 +116,16 @@ class SuiteRunner(ABC):
                 run_id=f"{self.suite.start_time:.0f}",
             )
 
+        self.cache_ext_policy: Optional[actions.CacheExtPolicy] = None
+        if config_to_bool(self.config, "CACHE_EXT_POLICY", False):
+            binary_name = (
+                self.config.get("CACHE_EXT_POLICY_BINARY")
+                or actions.CacheExtPolicy.DEFAULT_BINARY_NAME
+            )
+            self.cache_ext_policy = actions.CacheExtPolicy(
+                self.suite.ssh_target, binary_name=binary_name
+            )
+
     def run(self) -> None:
         self._run_before()
         self.suite.run()
@@ -178,6 +188,12 @@ class SuiteRunner(ABC):
             print("Before: Start PageEvictTracker")
             self.page_evict_tracker.start()
 
+        if self.cache_ext_policy is not None:
+            print("Before: Init CacheExtPolicy")
+            self.cache_ext_policy.prepare()
+            print("Before: Start CacheExtPolicy")
+            self.cache_ext_policy.start()
+
         for bc in self.bpftrace_clients:
             print(f"Before: Preparing bpftrace client '{bc.config.name}'")
             bc.prepare(log=self.suite.log_config(f"before/bpftrace-{bc.config.name}"))
@@ -192,6 +208,12 @@ class SuiteRunner(ABC):
             print("After: Stop PageEvictTracker")
             self.page_evict_tracker.stop(
                 self.suite.log_config("after/page_evict_tracker")
+            )
+
+        if self.cache_ext_policy is not None:
+            print("After: Stop CacheExtPolicy")
+            self.cache_ext_policy.stop(
+                self.suite.log_config("after/cache_ext_policy")
             )
 
         if self.suite.pg_admin_target.log_folder is not None:

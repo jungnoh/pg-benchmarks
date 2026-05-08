@@ -1,5 +1,8 @@
 import re
+import socket
 import subprocess
+import sys
+import threading
 import time
 import uuid
 from datetime import datetime
@@ -334,4 +337,140 @@ class PageEvictTracker:
         remote_dir = f"~/{self.REMOTE_OUTPUT_DIR}/{self.run_id}"
         ssh_retrieve_directory(self.ssh_target, remote_dir, str(local_dir))
 
+        self.started = False
+
+
+class CacheExtPolicy:
+    BINARY_DIR = "./cache-ext-policies/out"
+    DEFAULT_BINARY_NAME = "cache_ext_psql_noop"
+    WATCH_DIR = "/mnt/psql/18"
+    CGROUP_PATH = (
+        "/sys/fs/cgroup/system.slice/system-postgresql.slice/"
+        "postgresql@18-main.service"
+    )
+    STARTUP_RETRY_ATTEMPTS = 5
+    STARTUP_PROBE_DELAY_SECS = 2
+    SHUTDOWN_TIMEOUT_SECS = 300
+
+    def __init__(
+        self, ssh_target: SshTarget, binary_name: str = DEFAULT_BINARY_NAME
+    ):
+        self.id = str(uuid.uuid4())
+        self.ssh_target = ssh_target
+        self.binary_name = binary_name
+        self.binary_path = f"{self.BINARY_DIR}/{binary_name}.out"
+        self.pgrep_pattern = f"{binary_name}.out"
+        self.screen_session: Optional[str] = None
+        self.remote_log_path: Optional[str] = None
+        self.ssh = paramiko.SSHClient()
+        self.ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+        self.started = False
+        self._tail_stop: Optional[threading.Event] = None
+        self._tail_thread: Optional[threading.Thread] = None
+
+    def prepare(self):
+        print("Connecting to the target")
+        self.ssh.connect(
+            self.ssh_target.hostname,
+            port=self.ssh_target.port,
+            username=self.ssh_target.username,
+            password=self.ssh_target.password,
+        )
+        print("Connected to the target")
+
+    def start(self):
+        for attempt in range(1, self.STARTUP_RETRY_ATTEMPTS + 1):
+            session_name = f"cache-ext-{self.id}-{attempt}"
+            log_path = f"/tmp/cache-ext-{self.id}-{attempt}.log"
+            cmd = (
+                f"bash -lc 'cd ~ && touch {log_path} && "
+                f"screen -dmS {session_name} -L -Logfile {log_path} "
+                f"sudo {self.binary_path} "
+                f"--watch_dir {self.WATCH_DIR} "
+                f"--cgroup_path {self.CGROUP_PATH}'"
+            )
+            print(f"Starting cache-ext policy (attempt {attempt}): {cmd}")
+            self.ssh.exec_command(cmd)
+            time.sleep(self.STARTUP_PROBE_DELAY_SECS)
+
+            _, stdout, _ = self.ssh.exec_command(
+                f"pgrep -f '{self.pgrep_pattern}'"
+            )
+            if stdout.read().decode().strip() != "":
+                self.screen_session = session_name
+                self.remote_log_path = log_path
+                self.started = True
+                self._start_tail_thread()
+                return
+
+            print(
+                f"cache-ext policy failed to start "
+                f"(attempt {attempt}/{self.STARTUP_RETRY_ATTEMPTS})"
+            )
+            self.ssh.exec_command(f"screen -X -S {session_name} quit")
+
+        raise RuntimeError(
+            f"cache-ext policy failed to start after "
+            f"{self.STARTUP_RETRY_ATTEMPTS} attempts"
+        )
+
+    def _start_tail_thread(self):
+        self._tail_stop = threading.Event()
+        self._tail_thread = threading.Thread(
+            target=self._tail_loop, daemon=True
+        )
+        self._tail_thread.start()
+
+    def _tail_loop(self):
+        transport = self.ssh.get_transport()
+        if transport is None:
+            return
+        channel = transport.open_session()
+        channel.exec_command(f"tail -F {self.remote_log_path}")
+        channel.settimeout(0.5)
+        try:
+            while not self._tail_stop.is_set():
+                try:
+                    data = channel.recv(4096)
+                    if not data:
+                        break
+                    sys.stdout.write(data.decode(errors="replace"))
+                    sys.stdout.flush()
+                except socket.timeout:
+                    continue
+                except Exception:
+                    break
+        finally:
+            try:
+                channel.close()
+            except Exception:
+                pass
+
+    def stop(self, log: LogConfig):
+        if not self.started:
+            print("No cache-ext policy is running")
+            return
+
+        self.ssh.exec_command(f"sudo pkill -INT -f '{self.pgrep_pattern}'")
+
+        wait_count = int(self.SHUTDOWN_TIMEOUT_SECS / 0.5)
+        for i in range(wait_count):
+            _, stdout, _ = self.ssh.exec_command(
+                f"pgrep -f '{self.pgrep_pattern}'"
+            )
+            if stdout.read().decode().strip() == "":
+                print("cache-ext policy stopped")
+                break
+            if i == wait_count - 1:
+                print("cache-ext policy did not stop within timeout")
+                break
+            time.sleep(0.5)
+
+        if self._tail_stop is not None:
+            self._tail_stop.set()
+        if self._tail_thread is not None:
+            self._tail_thread.join(timeout=2)
+
+        if self.screen_session is not None:
+            self.ssh.exec_command(f"screen -X -S {self.screen_session} quit")
         self.started = False

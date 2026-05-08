@@ -7,3 +7,4 @@ venv
 hammerdb-scripts/
 *.tar.gz
 .claude
+vm-shared

@@ -1,5 +1,7 @@
+import argparse
 import os
 import sys
+from typing import Optional
 
 import pylib.suite as suite
 from pylib.hammerdb import HammerDBConfig, ScriptBuilder, run_script
@@ -8,19 +10,24 @@ from pylib.target_run import LogConfig
 
 class HammerDBSuite(suite.Suite):
     name_prefix = ""
+    sample_id: Optional[str] = None
 
     def __init__(self, config_file: str):
         super().__init__()
         self.config = HammerDBConfig.read_config_file(config_file)
 
+    def run_id_suffix(self) -> str:
+        if self.sample_id:
+            return f"{self.start_time:.0f}-{self.sample_id}"
+        return f"{self.start_time:.0f}"
+
     def log_config(self, action: str) -> LogConfig:
+        suffix = self.run_id_suffix()
         if self.name_prefix == "":
-            return LogConfig(run_id=f"hammerdb/{self.start_time:.0f}", action=action)
-        else:
-            return LogConfig(
-                run_id=f"hammerdb/{self.name_prefix}-{self.start_time:.0f}",
-                action=action,
-            )
+            return LogConfig(run_id=f"hammerdb/{suffix}", action=action)
+        return LogConfig(
+            run_id=f"hammerdb/{self.name_prefix}-{suffix}", action=action
+        )
 
     def prepare(self):
         os.makedirs("hammerdb-scripts", exist_ok=True)
@@ -54,20 +61,46 @@ class HammerDBSuite(suite.Suite):
 
 if __name__ == "__main__":
     overrides, argv = suite.parse_cli_overrides(sys.argv)
-    if len(argv) < 2:
-        sys.exit(f"Usage: {argv[0]} <prepare|run|cleanup>")
 
-    s = HammerDBSuite("hammerdb.conf")
-    runner = suite.SuiteRunner("target.conf", s, config_overrides=overrides)
+    parser = argparse.ArgumentParser(prog=argv[0])
+    subparsers = parser.add_subparsers(dest="command", required=True)
+    subparsers.add_parser("prepare")
+    run_parser = subparsers.add_parser("run")
+    run_parser.add_argument("name", nargs="?", default="")
+    run_parser.add_argument("--samples", type=int, default=1)
+    subparsers.add_parser("cleanup")
 
-    command = argv[1]
-    if command == "prepare":
+    args = parser.parse_args(argv[1:])
+
+    if args.command == "prepare":
+        s = HammerDBSuite("hammerdb.conf")
+        suite.SuiteRunner("target.conf", s, config_overrides=overrides)
         s.prepare()
-    elif command == "run":
-        if len(argv) >= 3:
-            s.name_prefix = argv[2]
-        runner.run()
-    elif command == "cleanup":
+    elif args.command == "cleanup":
+        s = HammerDBSuite("hammerdb.conf")
+        suite.SuiteRunner("target.conf", s, config_overrides=overrides)
         s.cleanup()
-    else:
-        sys.exit(f"Usage: {argv[0]} <prepare|run|cleanup>")
+    elif args.command == "run":
+        if args.samples < 1:
+            run_parser.error("--samples must be >= 1")
+        if args.samples > 1 and not args.name:
+            run_parser.error("--samples > 1 requires a run name")
+
+        if args.samples == 1:
+            s = HammerDBSuite("hammerdb.conf")
+            if args.name:
+                s.name_prefix = args.name
+            runner = suite.SuiteRunner(
+                "target.conf", s, config_overrides=overrides
+            )
+            runner.run()
+        else:
+            for i in range(1, args.samples + 1):
+                print(f"=== Sample {i}/{args.samples} ===")
+                s = HammerDBSuite("hammerdb.conf")
+                s.name_prefix = args.name
+                s.sample_id = f"sample{i:02d}"
+                runner = suite.SuiteRunner(
+                    "target.conf", s, config_overrides=overrides
+                )
+                runner.run()

@@ -14,7 +14,9 @@ from .util import read_config_file
 
 
 def config_to_bool(config: Dict[str, str], key: str, default: bool = False) -> bool:
-    value = config.get(key, default)
+    value = config.get(key)
+    if value is None:
+        return default
     if value.lower() in ["true", "yes", "1"]:
         return True
     elif value.lower() in ["false", "no", "0"]:
@@ -79,8 +81,11 @@ class Suite(ABC):
     def cleanup(self) -> None:
         pass
 
+    def run_id_suffix(self) -> str:
+        return f"{self.start_time:.0f}"
+
     def log_config(self, action: str) -> LogConfig:
-        return LogConfig(run_id=f"{self.start_time:.0f}", action=action)
+        return LogConfig(run_id=self.run_id_suffix(), action=action)
 
 
 class SuiteRunner(ABC):
@@ -157,7 +162,7 @@ class SuiteRunner(ABC):
         if config_to_bool(self.config, "PAGE_EVICT_TRACKER", False):
             self.page_evict_tracker = actions.PageEvictTracker(
                 self.suite.ssh_target,
-                run_id=f"{self.suite.start_time:.0f}",
+                run_id=self.suite.run_id_suffix(),
             )
 
         self.cache_ext_policy: Optional[actions.CacheExtPolicy] = None

@@ -228,10 +228,12 @@ class VMController:
         )
 
     def _read_pidfile(self) -> Optional[int]:
+        # PermissionError can happen when the pidfile was just written by
+        # root-qemu and has not yet been chmod'd to 0644 by the start path.
         try:
             with open(self.pidfile_path) as f:
                 pid = int(f.read().strip())
-        except (FileNotFoundError, ValueError):
+        except (FileNotFoundError, ValueError, PermissionError):
             return None
         return pid if pid > 0 else None
 
@@ -351,6 +353,15 @@ class VMController:
                         f"QEMU started with unexpected dimensions: got "
                         f"{cur.cpu} CPU/{cur.mem_gb}G, expected "
                         f"{expected_cpu} CPU/{expected_mem}G"
+                    )
+                # qemu wrote the pidfile under root's umask (typically 0600).
+                # Make it world-readable so user-level Python can read it
+                # without sudo on subsequent status() calls.
+                if os.path.exists(self.pidfile_path):
+                    subprocess.run(
+                        ["sudo", "chmod", "0644", self.pidfile_path],
+                        capture_output=True,
+                        check=False,
                     )
                 return
             time.sleep(1)

@@ -7,5 +7,7 @@ venv
 hammerdb-scripts/
 *.tar.gz
 .claude
-vm-shared
 __pycache__
+
+vm-shared
+.vm-state

@@ -73,6 +73,7 @@ if __name__ == "__main__":
 
     s = SysbenchSuite("oltp_read_write", "sysbench.conf")
     runner = suite.SuiteRunner("target.conf", s, config_overrides=overrides)
+    runner.vm_controller.ensure_running(s.ssh_target, s.pg_admin_target)
 
     command = argv[1]
     if command == "prepare":
@@ -84,10 +85,10 @@ if __name__ == "__main__":
                 "cache-ext policy did not exit cleanly; "
                 "recovering VM before exiting"
             )
-            suite.recover_vm_via_vmctl(
+            suite.recover_vm(
+                runner.vm_controller,
                 runner.suite.ssh_target,
                 runner.suite.pg_admin_target,
-                runner.suite.log_config("after/vm_recovery"),
             )
     elif command == "cleanup":
         s.cleanup()

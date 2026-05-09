@@ -74,11 +74,13 @@ if __name__ == "__main__":
 
     if args.command == "prepare":
         s = HammerDBSuite("hammerdb.conf")
-        suite.SuiteRunner("target.conf", s, config_overrides=overrides)
+        runner = suite.SuiteRunner("target.conf", s, config_overrides=overrides)
+        runner.vm_controller.ensure_running(s.ssh_target, s.pg_admin_target)
         s.prepare()
     elif args.command == "cleanup":
         s = HammerDBSuite("hammerdb.conf")
-        suite.SuiteRunner("target.conf", s, config_overrides=overrides)
+        runner = suite.SuiteRunner("target.conf", s, config_overrides=overrides)
+        runner.vm_controller.ensure_running(s.ssh_target, s.pg_admin_target)
         s.cleanup()
     elif args.command == "run":
         if args.samples < 1:
@@ -93,16 +95,17 @@ if __name__ == "__main__":
             runner = suite.SuiteRunner(
                 "target.conf", s, config_overrides=overrides
             )
+            runner.vm_controller.ensure_running(s.ssh_target, s.pg_admin_target)
             runner.run()
             if suite.cache_ext_policy_timed_out(runner):
                 print(
                     "cache-ext policy did not exit cleanly; "
                     "recovering VM before exiting"
                 )
-                suite.recover_vm_via_vmctl(
+                suite.recover_vm(
+                    runner.vm_controller,
                     runner.suite.ssh_target,
                     runner.suite.pg_admin_target,
-                    runner.suite.log_config("after/vm_recovery"),
                 )
         else:
             for i in range(1, args.samples + 1):
@@ -113,14 +116,17 @@ if __name__ == "__main__":
                 runner = suite.SuiteRunner(
                     "target.conf", s, config_overrides=overrides
                 )
+                runner.vm_controller.ensure_running(
+                    s.ssh_target, s.pg_admin_target
+                )
                 runner.run()
                 if suite.cache_ext_policy_timed_out(runner):
                     print(
                         f"cache-ext policy did not exit cleanly after "
                         f"sample {i}; recovering VM before continuing"
                     )
-                    suite.recover_vm_via_vmctl(
+                    suite.recover_vm(
+                        runner.vm_controller,
                         runner.suite.ssh_target,
                         runner.suite.pg_admin_target,
-                        runner.suite.log_config("after/vm_recovery"),
                     )

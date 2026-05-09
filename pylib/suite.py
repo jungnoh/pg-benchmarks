@@ -11,6 +11,7 @@ from . import vmstat
 from .bpftrace import BpftraceClient, BpftraceConfig
 from .target_run import LogConfig, PgTarget, SshTarget
 from .util import read_config_file
+from .vm import VMConfig, VMController
 
 
 def config_to_bool(config: Dict[str, str], key: str, default: bool = False) -> bool:
@@ -37,36 +38,16 @@ def cache_ext_policy_timed_out(runner: "SuiteRunner") -> bool:
     )
 
 
-def recover_vm_via_vmctl(
-    ssh_target: SshTarget, pg_target: PgTarget, log: LogConfig
+def recover_vm(
+    controller: VMController, ssh_target: SshTarget, pg_target: PgTarget
 ) -> None:
     """
-    Recover from a stuck cache-ext policy by restarting the VM with the
-    same CPU/MEM allocation, then waiting for SSH and PostgreSQL to come
-    back. PostgreSQL readiness is required because SSH typically responds
-    a few seconds before postgres finishes its startup recovery, and the
-    next sample's `_run_before` immediately issues `ALTER SYSTEM SET`.
+    Force-restart the VM to recover from a stuck cache-ext policy. Reads
+    desired CPU/MEM from vm.conf (via the controller), so recovery still
+    works when the running VM has wedged or crashed entirely.
     """
-    print("Recovery: querying VM CPU/MEM via `vmctl.sh status`")
-    result = run.shell_command("sudo ./common/vmctl.sh status", log)
-    parts = result.stdout.strip().split()
-    if len(parts) != 2:
-        raise RuntimeError(
-            f"vmctl.sh status returned unexpected output: {result.stdout!r}"
-        )
-    cpu, mem = parts
-    print(f"Recovery: VM was running with {cpu} CPU(s), {mem} GB memory")
-
-    print("Recovery: stopping VM")
-    run.shell_command("sudo ./common/vmctl.sh stop")
-
-    print(f"Recovery: starting VM with {cpu} CPU(s), {mem} GB memory")
-    run.shell_command(f"sudo ./common/vmctl.sh start {cpu} {mem}")
-
-    print("Recovery: waiting for SSH...")
-    run.wait_for_ssh_ready(ssh_target)
-    print("Recovery: waiting for PostgreSQL...")
-    run.wait_for_pg_ready(pg_target)
+    print("Recovery: force-restarting VM")
+    controller.ensure_running(ssh_target, pg_target, force=True)
     print("Recovery: VM is ready; resuming benchmark")
 
 
@@ -141,11 +122,13 @@ class SuiteRunner(ABC):
         config_file: str,
         suite: Suite,
         config_overrides: Optional[Dict[str, str]] = None,
+        vm_config_file: str = "vm.conf",
     ):
         self.config = read_config_file(config_file)
         if config_overrides:
             self.config.update(config_overrides)
         self.suite = suite
+        self.vm_controller = VMController(VMConfig.from_file(vm_config_file))
         self.pg_version = self.config.get("PG_VERSION", 18)
         self.pg_cluster_name = self.config.get("PG_CLUSTER_NAME", "main")
         self.suite.pg_admin_target = PgTarget(

@@ -25,6 +25,51 @@ def config_to_bool(config: Dict[str, str], key: str, default: bool = False) -> b
         raise ValueError(f"Invalid boolean value: {value}")
 
 
+def cache_ext_policy_timed_out(runner: "SuiteRunner") -> bool:
+    """
+    True iff the runner's cache-ext policy was enabled and its shutdown
+    SIGINT did not take effect within the policy's timeout. Caller should
+    treat this as a fatal condition and exit non-zero.
+    """
+    return (
+        runner.cache_ext_policy is not None
+        and runner.cache_ext_policy.timed_out
+    )
+
+
+def recover_vm_via_vmctl(
+    ssh_target: SshTarget, pg_target: PgTarget, log: LogConfig
+) -> None:
+    """
+    Recover from a stuck cache-ext policy by restarting the VM with the
+    same CPU/MEM allocation, then waiting for SSH and PostgreSQL to come
+    back. PostgreSQL readiness is required because SSH typically responds
+    a few seconds before postgres finishes its startup recovery, and the
+    next sample's `_run_before` immediately issues `ALTER SYSTEM SET`.
+    """
+    print("Recovery: querying VM CPU/MEM via `vmctl.sh status`")
+    result = run.shell_command("sudo ./common/vmctl.sh status", log)
+    parts = result.stdout.strip().split()
+    if len(parts) != 2:
+        raise RuntimeError(
+            f"vmctl.sh status returned unexpected output: {result.stdout!r}"
+        )
+    cpu, mem = parts
+    print(f"Recovery: VM was running with {cpu} CPU(s), {mem} GB memory")
+
+    print("Recovery: stopping VM")
+    run.shell_command("sudo ./common/vmctl.sh stop")
+
+    print(f"Recovery: starting VM with {cpu} CPU(s), {mem} GB memory")
+    run.shell_command(f"sudo ./common/vmctl.sh start {cpu} {mem}")
+
+    print("Recovery: waiting for SSH...")
+    run.wait_for_ssh_ready(ssh_target)
+    print("Recovery: waiting for PostgreSQL...")
+    run.wait_for_pg_ready(pg_target)
+    print("Recovery: VM is ready; resuming benchmark")
+
+
 def parse_cli_overrides(argv: List[str]) -> Tuple[Dict[str, str], List[str]]:
     """
     Strip recognized config-override flags from argv and return

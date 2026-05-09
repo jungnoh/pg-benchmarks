@@ -1,6 +1,7 @@
 import os
 import subprocess
 import tempfile
+import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import List, Optional
@@ -131,6 +132,46 @@ def ssh_retrieve_directory(
     else:
         scp_cmd = f"sshpass -p {target.password} scp -r -P {target.port} {target.username}@{target.hostname}:{source} {destination}"
     return shell_command(scp_cmd, log)
+
+
+def wait_for_ssh_ready(target: SshTarget, timeout_secs: int = 300) -> None:
+    """
+    Poll the SSH target with a no-op command until it succeeds or
+    `timeout_secs` elapses. Raises TimeoutError on deadline.
+    """
+    deadline = time.time() + timeout_secs
+    while True:
+        try:
+            ssh_command(target, "true")
+            return
+        except subprocess.CalledProcessError:
+            if time.time() >= deadline:
+                raise TimeoutError(
+                    f"SSH not ready on {target.hostname}:{target.port} "
+                    f"within {timeout_secs}s"
+                )
+            time.sleep(2)
+
+
+def wait_for_pg_ready(target: "PgTarget", timeout_secs: int = 300) -> None:
+    """
+    Poll the PostgreSQL target with `SELECT 1` until it accepts queries or
+    `timeout_secs` elapses. Distinguishes "still booting" (connection
+    accepted but FATAL: the database system is starting up) from "ready".
+    Raises TimeoutError on deadline.
+    """
+    deadline = time.time() + timeout_secs
+    while True:
+        try:
+            pg_queries(target, ["SELECT 1"])
+            return
+        except subprocess.CalledProcessError:
+            if time.time() >= deadline:
+                raise TimeoutError(
+                    f"PostgreSQL not ready on {target.hostname}:{target.port} "
+                    f"within {timeout_secs}s"
+                )
+            time.sleep(2)
 
 
 @dataclass

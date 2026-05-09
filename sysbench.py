@@ -79,6 +79,16 @@ if __name__ == "__main__":
         s.prepare()
     elif command == "run":
         runner.run()
+        if suite.cache_ext_policy_timed_out(runner):
+            print(
+                "cache-ext policy did not exit cleanly; "
+                "recovering VM before exiting"
+            )
+            suite.recover_vm_via_vmctl(
+                runner.suite.ssh_target,
+                runner.suite.pg_admin_target,
+                runner.suite.log_config("after/vm_recovery"),
+            )
     elif command == "cleanup":
         s.cleanup()
     else:

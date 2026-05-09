@@ -8,3 +8,4 @@ hammerdb-scripts/
 *.tar.gz
 .claude
 vm-shared
+__pycache__

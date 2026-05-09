@@ -94,6 +94,16 @@ if __name__ == "__main__":
                 "target.conf", s, config_overrides=overrides
             )
             runner.run()
+            if suite.cache_ext_policy_timed_out(runner):
+                print(
+                    "cache-ext policy did not exit cleanly; "
+                    "recovering VM before exiting"
+                )
+                suite.recover_vm_via_vmctl(
+                    runner.suite.ssh_target,
+                    runner.suite.pg_admin_target,
+                    runner.suite.log_config("after/vm_recovery"),
+                )
         else:
             for i in range(1, args.samples + 1):
                 print(f"=== Sample {i}/{args.samples} ===")
@@ -104,3 +114,13 @@ if __name__ == "__main__":
                     "target.conf", s, config_overrides=overrides
                 )
                 runner.run()
+                if suite.cache_ext_policy_timed_out(runner):
+                    print(
+                        f"cache-ext policy did not exit cleanly after "
+                        f"sample {i}; recovering VM before continuing"
+                    )
+                    suite.recover_vm_via_vmctl(
+                        runner.suite.ssh_target,
+                        runner.suite.pg_admin_target,
+                        runner.suite.log_config("after/vm_recovery"),
+                    )

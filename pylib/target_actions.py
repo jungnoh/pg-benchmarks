@@ -316,26 +316,43 @@ class PageEvictTracker:
             return
 
         pgrep_pattern = f"page-evict-tracker.*{self.run_id}"
-        self.ssh.exec_command(f"sudo pkill -INT -f '{pgrep_pattern}'")
 
-        wait_count = int(self.SHUTDOWN_TIMEOUT_SECS / 0.5)
-        for i in range(wait_count):
-            _, stdout, _ = self.ssh.exec_command(f"pgrep -f '{pgrep_pattern}'")
-            if stdout.read().decode().strip() == "":
-                print("page-evict-tracker stopped")
-                break
-            if i == wait_count - 1:
-                print("page-evict-tracker did not stop within timeout")
-                break
-            time.sleep(0.5)
+        # Pre-check: if the binary already exited, skip the pkill so we
+        # don't signal anything that happens to share the pattern.
+        _, stdout, _ = self.ssh.exec_command(f"pgrep -f '{pgrep_pattern}'")
+        if stdout.read().decode().strip() == "":
+            print("page-evict-tracker already exited; skipping SIGINT")
+        else:
+            self.ssh.exec_command(f"sudo pkill -INT -f '{pgrep_pattern}'")
+
+            wait_count = int(self.SHUTDOWN_TIMEOUT_SECS / 0.5)
+            for i in range(wait_count):
+                _, stdout, _ = self.ssh.exec_command(f"pgrep -f '{pgrep_pattern}'")
+                if stdout.read().decode().strip() == "":
+                    print("page-evict-tracker stopped")
+                    break
+                if i == wait_count - 1:
+                    print("page-evict-tracker did not stop within timeout")
+                    break
+                time.sleep(0.5)
 
         # Reap the (now likely empty) screen session either way.
         self.ssh.exec_command(f"screen -X -S {self.screen_session} quit")
 
-        local_dir = Path(log.log_file_folder()) / "after" / "page_evict_tracker"
-        local_dir.mkdir(parents=True, exist_ok=True)
         remote_dir = f"~/{self.REMOTE_OUTPUT_DIR}/{self.run_id}"
-        ssh_retrieve_directory(self.ssh_target, remote_dir, str(local_dir))
+        _, stdout, _ = self.ssh.exec_command(
+            f"test -d {remote_dir} && echo yes || echo no"
+        )
+        if stdout.read().decode().strip() == "yes":
+            local_dir = Path(log.log_file_folder()) / "after" / "page_evict_tracker"
+            local_dir.mkdir(parents=True, exist_ok=True)
+            ssh_retrieve_directory(self.ssh_target, remote_dir, str(local_dir))
+            self.ssh.exec_command(f"sudo rm -rf {remote_dir}")
+        else:
+            print(
+                f"page-evict-tracker output dir {remote_dir} does not exist; "
+                f"skipping retrieval"
+            )
 
         self.started = False
 
@@ -345,16 +362,13 @@ class CacheExtPolicy:
     DEFAULT_BINARY_NAME = "cache_ext_psql_noop"
     WATCH_DIR = "/mnt/psql/18"
     CGROUP_PATH = (
-        "/sys/fs/cgroup/system.slice/system-postgresql.slice/"
-        "postgresql@18-main.service"
+        "/sys/fs/cgroup/system.slice/system-postgresql.slice/postgresql@18-main.service"
     )
     STARTUP_RETRY_ATTEMPTS = 5
     STARTUP_PROBE_DELAY_SECS = 2
-    SHUTDOWN_TIMEOUT_SECS = 300
+    SHUTDOWN_TIMEOUT_SECS = 20
 
-    def __init__(
-        self, ssh_target: SshTarget, binary_name: str = DEFAULT_BINARY_NAME
-    ):
+    def __init__(self, ssh_target: SshTarget, binary_name: str = DEFAULT_BINARY_NAME):
         self.id = str(uuid.uuid4())
         self.ssh_target = ssh_target
         self.binary_name = binary_name
@@ -365,6 +379,7 @@ class CacheExtPolicy:
         self.ssh = paramiko.SSHClient()
         self.ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
         self.started = False
+        self.timed_out = False
         self._tail_stop: Optional[threading.Event] = None
         self._tail_thread: Optional[threading.Thread] = None
 
@@ -393,9 +408,7 @@ class CacheExtPolicy:
             self.ssh.exec_command(cmd)
             time.sleep(self.STARTUP_PROBE_DELAY_SECS)
 
-            _, stdout, _ = self.ssh.exec_command(
-                f"pgrep -f '{self.pgrep_pattern}'"
-            )
+            _, stdout, _ = self.ssh.exec_command(f"pgrep -f '{self.pgrep_pattern}'")
             if stdout.read().decode().strip() != "":
                 self.screen_session = session_name
                 self.remote_log_path = log_path
@@ -416,9 +429,7 @@ class CacheExtPolicy:
 
     def _start_tail_thread(self):
         self._tail_stop = threading.Event()
-        self._tail_thread = threading.Thread(
-            target=self._tail_loop, daemon=True
-        )
+        self._tail_thread = threading.Thread(target=self._tail_loop, daemon=True)
         self._tail_thread.start()
 
     def _tail_loop(self):
@@ -451,26 +462,44 @@ class CacheExtPolicy:
             print("No cache-ext policy is running")
             return
 
-        self.ssh.exec_command(f"sudo pkill -INT -f '{self.pgrep_pattern}'")
+        # Pre-check: if the binary is no longer running on the remote
+        # (e.g., it crashed during the run), skip the pkill entirely so
+        # we don't accidentally signal an unrelated process that happens
+        # to share the binary name pattern.
+        _, stdout, _ = self.ssh.exec_command(f"pgrep -f '{self.pgrep_pattern}'")
+        if stdout.read().decode().strip() == "":
+            print("cache-ext policy already exited; skipping SIGINT")
+            stopped = True
+        else:
+            self.ssh.exec_command(f"sudo pkill -INT -f '{self.pgrep_pattern}'")
 
-        wait_count = int(self.SHUTDOWN_TIMEOUT_SECS / 0.5)
-        for i in range(wait_count):
-            _, stdout, _ = self.ssh.exec_command(
-                f"pgrep -f '{self.pgrep_pattern}'"
-            )
-            if stdout.read().decode().strip() == "":
-                print("cache-ext policy stopped")
-                break
-            if i == wait_count - 1:
-                print("cache-ext policy did not stop within timeout")
-                break
-            time.sleep(0.5)
+            stopped = False
+            wait_count = int(self.SHUTDOWN_TIMEOUT_SECS / 0.5)
+            for _ in range(wait_count):
+                _, stdout, _ = self.ssh.exec_command(f"pgrep -f '{self.pgrep_pattern}'")
+                if stdout.read().decode().strip() == "":
+                    stopped = True
+                    print("cache-ext policy stopped")
+                    break
+                time.sleep(0.5)
+
+            if not stopped:
+                self.timed_out = True
+                print(
+                    f"cache-ext policy did not exit within "
+                    f"{self.SHUTDOWN_TIMEOUT_SECS}s of SIGINT; "
+                    f"leaving screen session '{self.screen_session}' alive "
+                    f"to avoid SIGKILL escalation"
+                )
 
         if self._tail_stop is not None:
             self._tail_stop.set()
         if self._tail_thread is not None:
             self._tail_thread.join(timeout=2)
 
-        if self.screen_session is not None:
+        # Only reap the screen session when the binary has already exited.
+        # `screen -X quit` would SIGHUP and then SIGKILL any surviving
+        # children, which violates the SIGINT-only contract.
+        if stopped and self.screen_session is not None:
             self.ssh.exec_command(f"screen -X -S {self.screen_session} quit")
         self.started = False

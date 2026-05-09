@@ -56,31 +56,39 @@ def parse_cli_overrides(argv: List[str]) -> Tuple[Dict[str, str], List[str]]:
     Strip recognized config-override flags from argv and return
     (overrides, remaining_argv). Recognized flags:
 
-      --cache-ext-policy             -> CACHE_EXT_POLICY=true
-      --no-cache-ext-policy          -> CACHE_EXT_POLICY=false
-      --cache-ext-policy-binary NAME -> CACHE_EXT_POLICY_BINARY=NAME
-      --cache-ext-policy-binary=NAME -> CACHE_EXT_POLICY_BINARY=NAME
+      --cep                  -> CACHE_EXT_POLICY=true
+      --no-cep               -> CACHE_EXT_POLICY=false
+      --cep-binary NAME      -> CACHE_EXT_POLICY_BINARY=NAME
+      --cep-binary=NAME      -> CACHE_EXT_POLICY_BINARY=NAME
+      --cep-extra-args ARGS  -> CACHE_EXT_POLICY_EXTRA_ARGS=ARGS
+      --cep-extra-args=ARGS  -> CACHE_EXT_POLICY_EXTRA_ARGS=ARGS
     """
     overrides: Dict[str, str] = {}
     remaining: List[str] = []
     i = 0
     while i < len(argv):
         a = argv[i]
-        if a == "--cache-ext-policy":
+        if a == "--cep":
             overrides["CACHE_EXT_POLICY"] = "true"
             i += 1
-        elif a == "--no-cache-ext-policy":
+        elif a == "--no-cep":
             overrides["CACHE_EXT_POLICY"] = "false"
             i += 1
-        elif a == "--cache-ext-policy-binary":
+        elif a == "--cep-binary":
             if i + 1 >= len(argv):
-                raise ValueError(
-                    "--cache-ext-policy-binary requires a value"
-                )
+                raise ValueError("--cep-binary requires a value")
             overrides["CACHE_EXT_POLICY_BINARY"] = argv[i + 1]
             i += 2
-        elif a.startswith("--cache-ext-policy-binary="):
+        elif a.startswith("--cep-binary="):
             overrides["CACHE_EXT_POLICY_BINARY"] = a.split("=", 1)[1]
+            i += 1
+        elif a == "--cep-extra-args":
+            if i + 1 >= len(argv):
+                raise ValueError("--cep-extra-args requires a value")
+            overrides["CACHE_EXT_POLICY_EXTRA_ARGS"] = argv[i + 1]
+            i += 2
+        elif a.startswith("--cep-extra-args="):
+            overrides["CACHE_EXT_POLICY_EXTRA_ARGS"] = a.split("=", 1)[1]
             i += 1
         else:
             remaining.append(a)
@@ -199,8 +207,11 @@ class SuiteRunner(ABC):
                 self.config.get("CACHE_EXT_POLICY_BINARY")
                 or actions.CacheExtPolicy.DEFAULT_BINARY_NAME
             )
+            extra_args = self.config.get("CACHE_EXT_POLICY_EXTRA_ARGS") or ""
             self.cache_ext_policy = actions.CacheExtPolicy(
-                self.suite.ssh_target, binary_name=binary_name
+                self.suite.ssh_target,
+                binary_name=binary_name,
+                extra_args=extra_args,
             )
 
     def run(self) -> None:

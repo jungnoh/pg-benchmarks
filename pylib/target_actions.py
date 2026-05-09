@@ -368,12 +368,18 @@ class CacheExtPolicy:
     STARTUP_PROBE_DELAY_SECS = 2
     SHUTDOWN_TIMEOUT_SECS = 20
 
-    def __init__(self, ssh_target: SshTarget, binary_name: str = DEFAULT_BINARY_NAME):
+    def __init__(
+        self,
+        ssh_target: SshTarget,
+        binary_name: str = DEFAULT_BINARY_NAME,
+        extra_args: str = "",
+    ):
         self.id = str(uuid.uuid4())
         self.ssh_target = ssh_target
         self.binary_name = binary_name
         self.binary_path = f"{self.BINARY_DIR}/{binary_name}.out"
         self.pgrep_pattern = f"{binary_name}.out"
+        self.extra_args = extra_args
         self.screen_session: Optional[str] = None
         self.remote_log_path: Optional[str] = None
         self.ssh = paramiko.SSHClient()
@@ -397,12 +403,14 @@ class CacheExtPolicy:
         for attempt in range(1, self.STARTUP_RETRY_ATTEMPTS + 1):
             session_name = f"cache-ext-{self.id}-{attempt}"
             log_path = f"/tmp/cache-ext-{self.id}-{attempt}.log"
+            extra = f" {self.extra_args}" if self.extra_args else ""
             cmd = (
                 f"bash -lc 'cd ~ && touch {log_path} && "
                 f"screen -dmS {session_name} -L -Logfile {log_path} "
                 f"sudo {self.binary_path} "
                 f"--watch_dir {self.WATCH_DIR} "
-                f"--cgroup_path {self.CGROUP_PATH}'"
+                f"--cgroup_path {self.CGROUP_PATH}"
+                f"{extra}'"
             )
             print(f"Starting cache-ext policy (attempt {attempt}): {cmd}")
             self.ssh.exec_command(cmd)

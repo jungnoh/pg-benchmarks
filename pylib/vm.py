@@ -16,6 +16,21 @@ from .util import read_config_file
 
 SCREEN_BIN = "/usr/bin/screen"
 
+# Port forwarding (host:guest). Edit here, not in vm.conf.
+QEMU_SSH_PORT = 5555
+QEMU_GDB_PORT = 1235
+PSQL_VM_PORT = 5432
+PSQL_HOST_PORT = 35432
+PSQL_EXPORTER_VM_PORT = 9187
+PSQL_EXPORTER_HOST_PORT = 39187
+NODE_EXPORTER_VM_PORT = 9100
+NODE_EXPORTER_HOST_PORT = 39100
+
+# Lifecycle internals.
+SCREEN_SESSION = "pg-benchmark-vm"
+STATE_DIR = ".vm-state"
+START_POLL_DEADLINE_SECS = 90
+
 
 @dataclass
 class VMConfig:
@@ -25,17 +40,6 @@ class VMConfig:
     nvme_pcie_addr: str
     cpu_count: int
     mem_gb: int
-    qemu_ssh_port: int = 5555
-    qemu_gdb_port: int = 1235
-    psql_vm_port: int = 5432
-    psql_host_port: int = 35432
-    psql_exporter_vm_port: int = 9187
-    psql_exporter_host_port: int = 39187
-    node_exporter_vm_port: int = 9100
-    node_exporter_host_port: int = 39100
-    screen_session: str = "pg-benchmark-vm"
-    state_dir: str = ".vm-state"
-    start_poll_deadline_secs: int = 90
 
     @classmethod
     def from_file(cls, path: str = "vm.conf") -> "VMConfig":
@@ -65,19 +69,6 @@ class VMConfig:
             nvme_pcie_addr=cfg["VM_NVME_PCIE_ADDR"],
             cpu_count=int(cfg["VM_CPU_COUNT"]),
             mem_gb=int(cfg["VM_MEM_GB"]),
-            qemu_ssh_port=int(cfg.get("VM_QEMU_SSH_PORT") or 5555),
-            qemu_gdb_port=int(cfg.get("VM_QEMU_GDB_PORT") or 1235),
-            psql_vm_port=int(cfg.get("VM_PSQL_VM_PORT") or 5432),
-            psql_host_port=int(cfg.get("VM_PSQL_HOST_PORT") or 35432),
-            psql_exporter_vm_port=int(cfg.get("VM_PSQL_EXPORTER_VM_PORT") or 9187),
-            psql_exporter_host_port=int(cfg.get("VM_PSQL_EXPORTER_HOST_PORT") or 39187),
-            node_exporter_vm_port=int(cfg.get("VM_NODE_EXPORTER_VM_PORT") or 9100),
-            node_exporter_host_port=int(cfg.get("VM_NODE_EXPORTER_HOST_PORT") or 39100),
-            screen_session=cfg.get("VM_SCREEN_SESSION") or "pg-benchmark-vm",
-            state_dir=cfg.get("VM_STATE_DIR") or ".vm-state",
-            start_poll_deadline_secs=int(
-                cfg.get("VM_START_POLL_DEADLINE_SECS") or 90
-            ),
         )
 
 
@@ -94,15 +85,15 @@ class VMController:
 
     @property
     def pidfile_path(self) -> str:
-        return os.path.join(self.config.state_dir, "qemu.pid")
+        return os.path.join(STATE_DIR, "qemu.pid")
 
     @property
     def lockfile_path(self) -> str:
-        return os.path.join(self.config.state_dir, "vm.lock")
+        return os.path.join(STATE_DIR, "vm.lock")
 
     @property
     def console_log_path(self) -> str:
-        return os.path.join(self.config.state_dir, "console.log")
+        return os.path.join(STATE_DIR, "console.log")
 
     def status(self) -> Optional[VMStatus]:
         pid = self._read_pidfile()
@@ -166,7 +157,7 @@ class VMController:
                     f"VM is already running (pid={cur.pid}, cpu={cur.cpu}, "
                     f"mem={cur.mem_gb}G); refusing to start a second one"
                 )
-            os.makedirs(self.config.state_dir, exist_ok=True)
+            os.makedirs(STATE_DIR, exist_ok=True)
             try:
                 os.unlink(self.pidfile_path)
             except FileNotFoundError:
@@ -174,7 +165,7 @@ class VMController:
             argv = self._build_screen_argv(cpu, mem_gb)
             print(
                 f"Starting VM under screen session "
-                f"'{self.config.screen_session}' ({cpu} CPU, {mem_gb}G RAM)"
+                f"'{SCREEN_SESSION}' ({cpu} CPU, {mem_gb}G RAM)"
             )
             subprocess.run(argv, check=True)
             self._wait_for_qemu_alive(cpu, mem_gb)
@@ -187,10 +178,9 @@ class VMController:
             if cur is None:
                 self._cleanup_after_stop()
                 return
-            session = self.config.screen_session
             print(f"Stopping VM (pid={cur.pid}); sending screen quit")
             subprocess.run(
-                ["sudo", SCREEN_BIN, "-X", "-S", session, "quit"],
+                ["sudo", SCREEN_BIN, "-X", "-S", SCREEN_SESSION, "quit"],
                 check=False,
             )
             if self._wait_for_exit(cur.pid, 10):
@@ -219,7 +209,7 @@ class VMController:
         # so attaching requires sudo too.
         os.execvp(
             "sudo",
-            ["sudo", SCREEN_BIN, "-r", self.config.screen_session],
+            ["sudo", SCREEN_BIN, "-r", SCREEN_SESSION],
         )
 
     def wait_ready(self, ssh: SshTarget, pg: PgTarget) -> None:
@@ -308,10 +298,10 @@ class VMController:
         c = self.config
         netdev = (
             "user,id=net0,restrict=off,"
-            f"hostfwd=tcp::{c.qemu_ssh_port}-:22,"
-            f"hostfwd=tcp::{c.psql_host_port}-:{c.psql_vm_port},"
-            f"hostfwd=tcp::{c.psql_exporter_host_port}-:{c.psql_exporter_vm_port},"
-            f"hostfwd=tcp::{c.node_exporter_host_port}-:{c.node_exporter_vm_port}"
+            f"hostfwd=tcp::{QEMU_SSH_PORT}-:22,"
+            f"hostfwd=tcp::{PSQL_HOST_PORT}-:{PSQL_VM_PORT},"
+            f"hostfwd=tcp::{PSQL_EXPORTER_HOST_PORT}-:{PSQL_EXPORTER_VM_PORT},"
+            f"hostfwd=tcp::{NODE_EXPORTER_HOST_PORT}-:{NODE_EXPORTER_VM_PORT}"
         )
         return [
             "qemu-system-x86_64",
@@ -327,7 +317,7 @@ class VMController:
             "-netdev", netdev,
             "-device", "virtio-net-pci,netdev=net0",
             "-mem-prealloc",
-            "-gdb", f"tcp::{c.qemu_gdb_port}",
+            "-gdb", f"tcp::{QEMU_GDB_PORT}",
             "-device", f"vfio-pci,host={c.nvme_pcie_addr}",
             "-virtfs",
             f"local,path={c.shared_path},mount_tag=hostshare,"
@@ -336,23 +326,23 @@ class VMController:
         ]
 
     def _build_screen_argv(self, cpu: int, mem_gb: int) -> List[str]:
-        os.makedirs(self.config.state_dir, exist_ok=True)
+        os.makedirs(STATE_DIR, exist_ok=True)
         return [
             "sudo",
             SCREEN_BIN,
-            "-dmS", self.config.screen_session,
+            "-dmS", SCREEN_SESSION,
             "-L", "-Logfile", os.path.abspath(self.console_log_path),
         ] + self._build_qemu_argv(cpu, mem_gb)
 
     def _wipe_dead_session(self) -> None:
         subprocess.run(
-            ["sudo", SCREEN_BIN, "-wipe", self.config.screen_session],
+            ["sudo", SCREEN_BIN, "-wipe", SCREEN_SESSION],
             capture_output=True,
             check=False,
         )
 
     def _wait_for_qemu_alive(self, expected_cpu: int, expected_mem: int) -> None:
-        deadline = time.time() + self.config.start_poll_deadline_secs
+        deadline = time.time() + START_POLL_DEADLINE_SECS
         while time.time() < deadline:
             cur = self.status()
             if cur is not None:
@@ -365,8 +355,7 @@ class VMController:
                 return
             time.sleep(1)
         raise TimeoutError(
-            f"QEMU did not appear within "
-            f"{self.config.start_poll_deadline_secs}s; check "
+            f"QEMU did not appear within {START_POLL_DEADLINE_SECS}s; check "
             f"{self.console_log_path} for boot output"
         )
 
@@ -380,7 +369,7 @@ class VMController:
 
     def _cleanup_after_stop(self) -> None:
         subprocess.run(
-            ["sudo", SCREEN_BIN, "-wipe", self.config.screen_session],
+            ["sudo", SCREEN_BIN, "-wipe", SCREEN_SESSION],
             capture_output=True,
             check=False,
         )
@@ -391,7 +380,7 @@ class VMController:
 
     @contextmanager
     def _flock(self):
-        os.makedirs(self.config.state_dir, exist_ok=True)
+        os.makedirs(STATE_DIR, exist_ok=True)
         f = open(self.lockfile_path, "w")
         try:
             fcntl.flock(f.fileno(), fcntl.LOCK_EX)

@@ -5,9 +5,9 @@ SCREEN_SESS_NAME=pg-benchmark-vm
 QEMU_SSH_PORT=5555
 QEMU_GDB_PORT=1235
 
-BOOT_IMG_PATH=/home/jungnoh/cache_ext/linux/arch/x86/boot/bzImage
-KERNEL_IMG_PATH=/home/jungnoh/djournalplus.code/tools/qemu/vm_imgs/qemu-image.qcow2
-VM_SHARED_PATH=/home/jungnoh/pg-benchmarks/vm-shared
+BOOT_IMG_PATH=/mnt/cache-ext-workspace/vm-data/bzImage
+KERNEL_IMG_PATH=/mnt/cache-ext-workspace/vm-data/qemu-image.qcow2
+VM_SHARED_PATH=/mnt/cache-ext-workspace/vm-data/shared
 
 PSQL_VM_PORT=5432
 PSQL_HOST_PORT=35432
@@ -18,7 +18,7 @@ PSQL_EXPORTER_HOST_PORT=39187
 NODE_EXPORTER_VM_PORT=9100
 NODE_EXPORTER_HOST_PORT=39100
 
-NVME_PCIE_ADDR="0000:3b:00.0" # Set proper PCIE address for your NVMe device.
+NVME_PCIE_ADDR="0000:af:00.0" # Set proper PCIE address for your NVMe device.
 
 case "$1" in
     start)
@@ -32,7 +32,7 @@ case "$1" in
         TOTAL_MEM="${3}G"
 
         # numactl --cpunodebind=0 --membind=0 \
-        # screen -dmS "$SCREEN_SESS_NAME"  \
+        screen -dmS "$SCREEN_SESS_NAME"  \
 	qemu-system-x86_64 -kernel "$BOOT_IMG_PATH" \
             -cpu host \
             -smp cpus="$CPU_COUNT" \

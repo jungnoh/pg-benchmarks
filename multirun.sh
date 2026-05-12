@@ -1,3 +1,7 @@
-# python hammerdb.py run run07-vanilla --samples=3 --no-cep &&
-# python hammerdb.py run run07-psql-noop --samples=3 --cep --cep-binary=cache_ext_psql_noop
-python hammerdb.py run run07-psql-lru-hot5pct --samples=3 --cep --cep-binary=cache_ext_psql_lru --cep-extra-args="--hot_cap_pct 5"
+# Baseline (no cache-ext policy).
+python hammerdb.py run tpcc-48-final2-baseline --samples=4 --no-cep && \
+
+# Our policy: v1 (INDEX-only hot) + N1 (WAL-eject-first) +
+# N2 (broad insert-TTL pin, 30s) + N5 (WAL high-watermark, 8-folio trail).
+python hammerdb.py run tpcc-48-final2-policy_tpcc --samples=4 \
+    --cep --cep-binary=cache_ext_psql_tpcc 

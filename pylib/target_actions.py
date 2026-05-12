@@ -79,6 +79,36 @@ def pg_print_stats(
     )
 
 
+def pg_vacuum_analyze(
+    target: PgTarget, log: Optional[LogConfig] = None
+) -> subprocess.CompletedProcess:
+    """
+    VACUUM (ANALYZE) all tables in the target database, then CHECKPOINT to
+    flush dirty buffers to disk. Standardizes dead-tuple bloat at run start
+    so autovacuum catch-up work happens outside the measurement window.
+
+    Wraps the VACUUM in ALTER SYSTEM SET *_cost_delay=0 + pg_reload_conf()
+    so it runs unthrottled, then RESETs afterward. psql -f processes all
+    statements sequentially without aborting on per-statement errors
+    (ON_ERROR_STOP unset), so the RESETs still execute if the VACUUM
+    itself errors — leaving the cluster's cost-delay settings restored.
+    """
+    return pg_queries(
+        target,
+        [
+            "ALTER SYSTEM SET autovacuum_vacuum_cost_delay = 0;",
+            "ALTER SYSTEM SET vacuum_cost_delay = 0;",
+            "SELECT pg_reload_conf();",
+            "VACUUM (ANALYZE);",
+            "CHECKPOINT;",
+            "ALTER SYSTEM RESET autovacuum_vacuum_cost_delay;",
+            "ALTER SYSTEM RESET vacuum_cost_delay;",
+            "SELECT pg_reload_conf();",
+        ],
+        log,
+    )
+
+
 def pg_build_configs(system_mem_size_gb: int) -> Dict[str, str]:
     """
     Returns a dictionary of PostgreSQL configurations as guided by pgtune.

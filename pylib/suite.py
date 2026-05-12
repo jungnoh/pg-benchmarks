@@ -162,6 +162,9 @@ class SuiteRunner(ABC):
         self.pg_optimize_configs = config_to_bool(
             self.config, "PG_OPTIMIZE_CONFIGS", False
         )
+        self.pg_vacuum_before_run = config_to_bool(
+            self.config, "PG_VACUUM_BEFORE_RUN", True
+        )
 
         if config_to_bool(self.config, "BPFTRACE_RECLAIM_TS", False):
             bpftrace_config = BpftraceConfig.reclaim_ts(self.config)
@@ -249,6 +252,23 @@ class SuiteRunner(ABC):
             ],
             self.suite.log_config("before/log-02-script"),
         )
+
+        if self.pg_vacuum_before_run:
+            # Move autovacuum catch-up work out of the measurement window:
+            # VACUUM (ANALYZE) the runner DB to clean accumulated bloat,
+            # CHECKPOINT to flush dirty buffers, then drop_caches again so
+            # the test still starts page-cache-cold. The VACUUM runs
+            # unthrottled (cost-delays set to 0 for the duration).
+            print("Before: VACUUM (ANALYZE) + CHECKPOINT on runner database")
+            actions.pg_vacuum_analyze(
+                self.suite.pg_runner_target,
+                log=self.suite.log_config("before/log-02b-vacuum"),
+            )
+            run.ssh_commands(
+                self.suite.ssh_target,
+                [actions.CMD_SYNC, actions.CMD_DROP_CACHES],
+                self.suite.log_config("before/log-02c-postvac-script"),
+            )
 
         print("Before: Reset psql stats")
         actions.pg_clear_stats(
